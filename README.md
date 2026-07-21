@@ -14,7 +14,10 @@ All pulls read the **read-only Postgres** directly — no cookies, no website.
 `.colmap.json` header→index map derived from the actual header row (never
 hard-code column offsets — the schema drifts between GEM database revisions).
 `goget` has no flat all-fields exporter yet, so its pull is a multi-table
-export (`plant_history` excluded by default — it's multi-GB).
+export (`plant_history` excluded by default — it's multi-GB). The goget pull
+keeps soft-deleted records (GOGET deletes at the plant level; rows stay in
+Postgres with `plant.deleted` set) and propagates the flag into every child
+CSV as appended `plant_deleted` / `plant_deletedTimestamp` columns.
 
 ## Setup
 

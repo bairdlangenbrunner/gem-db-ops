@@ -10,7 +10,10 @@ database. `README.md` has the full layout and setup; the short version:
   as the website's GOGPT export.
 - "pull GOGET" → `python goget/pull.py` → `goget/gem_export_goget_tables/`
   (one CSV per table + manifest; no flat all-fields exporter exists for GOGET;
-  `plant_history` excluded unless `--include-history`).
+  `plant_history` excluded unless `--include-history`). Soft-deleted records
+  are kept and marked: child CSVs get appended `plant_deleted` /
+  `plant_deletedTimestamp` columns propagated from `plant.deleted`
+  (`--mark-only` re-runs just that pass).
 
 All pulls read the read-only Postgres (`GEM_READONLY_DB_URL`).
 
