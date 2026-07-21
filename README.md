@@ -44,6 +44,8 @@ credentials.)
 - `gem_export_via_web.py` — cookie-based downloads of the website's own export
   endpoints. **NOT IN USE** — nothing invokes it; kept for reference only. Do
   not wire it back into any pull path without asking.
+- `schema_dbml.py` — dumps the live schema as DBML to `docs/gem_schema.dbml`;
+  paste into https://dbdiagram.io/d for an up-to-date relational diagram.
 
 ## Notes
 
