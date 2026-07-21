@@ -28,6 +28,7 @@ Rules:
   and report the row/column counts.
 - `gem_all_fields.py` run directly is a silent no-op — always pull via a
   `pull.py` or `gem_query.py --all-fields`.
-- These scripts are shared with `../lng-terminals-researcher/scripts/` — a bug
-  fix in `gem_query.py` / `gem_all_fields.py` / `gem_export_via_web.py` should
-  be mirrored there too.
+- This repo is the ONLY home of the pull engine (single source of truth as of
+  2026-07-21). `../lng-terminals-researcher` keeps no copies — its workflows
+  invoke `../../gem-db-ops/gem_query.py` directly, so an engine fix here fixes
+  every consumer.

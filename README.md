@@ -56,6 +56,7 @@ credentials.)
   not data snapshots.
 - `archive/` (gitignored) holds pre-restructure May-2026 export snapshots;
   delete it whenever.
-- The LNG research workflow lives in `../lng-terminals-researcher`, which
-  keeps its own copies of these scripts under `scripts/`; if you fix a bug in
-  the shared engine code, mirror it in both places.
+- The LNG research workflow lives in `../lng-terminals-researcher` and pulls
+  via this repo (`python ../../gem-db-ops/gem_query.py --all-fields lng ...`
+  from its `scripts/`); it keeps no engine copies, so fixes here are the only
+  fixes needed.
