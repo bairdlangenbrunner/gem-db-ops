@@ -1,0 +1,14 @@
+# pulled data — this repo versions tooling, not snapshots
+*.csv
+*.colmap.json
+archive/
+goget/gem_export_goget_tables/
+
+# credentials
+.env
+
+# local machine noise
+__pycache__/
+*.pyc
+.DS_Store
+.claude/settings.local.json
