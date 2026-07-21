@@ -1,4 +1,4 @@
-# gem-database-access
+# gem-db-ops
 
 Standalone tooling for pulling fresh CSV exports from the GEM project database
 (read-only), for three trackers:

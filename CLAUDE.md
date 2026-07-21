@@ -1,4 +1,4 @@
-# gem-database-access
+# gem-db-ops
 
 Standalone repo for pulling fresh read-only CSV exports from the GEM project
 database. `README.md` has the full layout and setup; the short version:
