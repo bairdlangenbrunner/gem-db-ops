@@ -3,43 +3,28 @@
 Standalone tooling for pulling fresh CSV exports from the GEM project database
 (read-only), for three trackers:
 
-| Folder | Tracker | Pull command | Primary path |
+| Folder | Tracker | Pull command | Output |
 |---|---|---|---|
-| `lng/` | LNG terminals (GGIT-LNG) | `python lng/pull.py` | Postgres (no cookies) |
-| `gogpt/` | Oil & gas power plants (GOGPT) | `python gogpt/pull.py` | Postgres (no cookies) |
-| `goget/` | Oil & gas extraction (GOGET) | `python goget/pull.py` | Website (cookie auth) |
+| `lng/` | LNG terminals (GGIT-LNG) | `python lng/pull.py` | flat 115-col all-fields CSV + colmap |
+| `gogpt/` | Oil & gas power plants (GOGPT) | `python gogpt/pull.py` | flat 86-col all-fields CSV + colmap |
+| `goget/` | Oil & gas extraction (GOGET) | `python goget/pull.py` | one CSV per table + manifest |
 
-Each `pull.py` writes the fresh CSV **into its own folder** (e.g.
-`lng/gem_export.csv`) plus a `.colmap.json` header→index map derived from the
-actual header row (never hard-code column offsets — the schema drifts between
-GEM database revisions).
+All pulls read the **read-only Postgres** directly — no cookies, no website.
+`lng` and `gogpt` write the fresh CSV **into their own folder** plus a
+`.colmap.json` header→index map derived from the actual header row (never
+hard-code column offsets — the schema drifts between GEM database revisions).
+`goget` has no flat all-fields exporter yet, so its pull is a multi-table
+export (`plant_history` excluded by default — it's multi-GB).
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
+export GEM_READONLY_DB_URL='postgres://readonly:PASSWORD@HOST:5432/DBNAME'
 ```
 
-Two auth mechanisms, set as environment variables (a gitignored `.env` works
-too if your shell loads it — never commit credentials):
-
-1. **Read-only Postgres** (primary for lng/gogpt; no expiry):
-
-   ```bash
-   export GEM_READONLY_DB_URL='postgres://readonly:PASSWORD@HOST:5432/DBNAME'
-   ```
-
-2. **Website session cookies** (goget's flat CSV; fallback for lng/gogpt via
-   `--via-web`). Log into the GEM project DB in your browser, copy the
-   `sessionid` and `csrftoken` cookies from DevTools → Application → Cookies:
-
-   ```bash
-   export GEM_PROJECT_DB_SESSIONID='...'
-   export GEM_PROJECT_DB_CSRFTOKEN='...'
-   ```
-
-   Cookies expire periodically — re-copy when a pull reports an auth failure.
-   Full procedure in `gem_export_via_web.py`'s docstring.
+(A gitignored `.env` works too if your shell loads it — never commit
+credentials.)
 
 ## Shared code (repo root)
 
@@ -54,13 +39,14 @@ too if your shell loads it — never commit credentials):
   `docs/ALL_FIELDS_STATUS.md`. No GOGET exporter yet — port one here following
   the lng/gogpt pattern if needed.
 - `gem_export_via_web.py` — cookie-based downloads of the website's own export
-  endpoints (`lng`, `lng_export`, `goget`, `gogpt`, `both`, `all`).
+  endpoints. **NOT IN USE** — nothing invokes it; kept for reference only. Do
+  not wire it back into any pull path without asking.
 
 ## Notes
 
 - Everything here is **read-only** against the GEM database: the Postgres role
   is `readonly` and sessions additionally set
-  `default_transaction_read_only=on`; the website path only GETs export CSVs.
+  `default_transaction_read_only=on`.
 - Pulled CSVs and colmaps are gitignored — this repo versions the tooling,
   not data snapshots.
 - `archive/` (gitignored) holds pre-restructure May-2026 export snapshots;

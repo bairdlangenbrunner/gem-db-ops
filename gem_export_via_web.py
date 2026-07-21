@@ -3,6 +3,11 @@
 gem_export_via_web.py — Download "all-fields" CSV exports from the running
 GEM project-database website.
 
+*** NOT IN USE (2026-07-21). Nothing invokes this script — all pulls go
+*** through the read-only Postgres (gem_query.py / the per-tracker pull.py
+*** scripts). Kept for reference only; do not wire it back into any pull
+*** path without asking the user.
+
 Authentication is by Django session cookie. The site uses Google SSO via
 django-allauth; there is no API-token mechanism. One-time setup:
 

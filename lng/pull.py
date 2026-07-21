@@ -3,21 +3,18 @@
 Pull the current LNG terminals "all-fields" CSV from the GEM database and
 derive the column-index map from the header row.
 
-Primary path (no cookies): direct read-only Postgres via ../gem_query.py's
+Reads directly from the read-only Postgres (no cookies) via ../gem_query.py's
 engine + ../gem_all_fields.py's exporter. Requires:
 
     export GEM_READONLY_DB_URL='postgres://readonly:PASSWORD@HOST:5432/DBNAME'
 
-Fallback path (--via-web): cookie-based download from the project-DB website
-via ../gem_export_via_web.py. Requires GEM_PROJECT_DB_SESSIONID and
-GEM_PROJECT_DB_CSRFTOKEN (see that script's docstring for the cookie
-extraction procedure).
+(The cookie-based website exporter ../gem_export_via_web.py is NOT in use —
+kept for reference only; do not wire it back in without asking the user.)
 
 Usage (from this folder or anywhere):
     python pull.py                      # fresh lng/gem_export.csv + .colmap.json
     python pull.py --output my.csv      # custom path
     python pull.py --map-only           # skip fetch; derive map from existing CSV
-    python pull.py --via-web            # cookie-based website download instead
     python pull.py --limit 30           # small sample (plant limit, for testing)
 
 Why re-derive the column map every pull: the all-fields export is ~115 columns
@@ -28,7 +25,6 @@ saved next to the CSV so downstream tooling reads the same one.
 import argparse
 import csv
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -161,7 +157,7 @@ EXPECTED_COLUMNS = {
 
 
 def pull_postgres(out_path: Path, limit=None):
-    """Primary path: flat all-fields export straight from the read-only Postgres."""
+    """Flat all-fields export straight from the read-only Postgres."""
     from gem_query import get_database_url, build_engine, DEFAULT_STATEMENT_TIMEOUT_MS
     from gem_all_fields import export_all_fields
 
@@ -169,19 +165,6 @@ def pull_postgres(out_path: Path, limit=None):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     n = export_all_fields(engine, str(out_path), limit)
     print(f"  wrote {n:,} unit rows to {out_path}", file=sys.stderr)
-
-
-def pull_via_web(out_path: Path, kind="lng"):
-    """Fallback path: cookie-based download from the project-DB website."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "gem_export_via_web.py"), kind, "-o", str(out_path)],
-    )
-    if result.returncode != 0:
-        sys.exit(f"ERROR: gem_export_via_web.py failed with exit code {result.returncode}")
-    size = out_path.stat().st_size
-    if size < 1000:
-        sys.exit(f"ERROR: CSV suspiciously small ({size} bytes) — verify auth and try again")
 
 
 def derive_column_map(csv_path: Path):
@@ -244,18 +227,11 @@ def main():
     p.add_argument("--output", "--out", dest="out", type=Path, default=DEFAULT_OUT)
     p.add_argument("--map-only", action="store_true",
                    help="Skip the fetch; just derive the map from an existing CSV")
-    p.add_argument("--via-web", action="store_true",
-                   help="Use the cookie-based website download instead of Postgres")
-    p.add_argument("--kind", default="lng", choices=["lng", "lng_export"],
-                   help="Website export format for --via-web (default: lng, the 115-col all-fields)")
-    p.add_argument("--limit", type=int, help="Plant-count cap for testing (Postgres path only)")
+    p.add_argument("--limit", type=int, help="Plant-count cap for testing")
     args = p.parse_args()
 
     if not args.map_only:
-        if args.via_web:
-            pull_via_web(args.out, kind=args.kind)
-        else:
-            pull_postgres(args.out, limit=args.limit)
+        pull_postgres(args.out, limit=args.limit)
 
     report_and_save_map(derive_column_map(args.out), args.out)
 
