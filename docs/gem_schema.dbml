@@ -1,0 +1,1265 @@
+// GEM relational database schema — generated 2026-07-21 from the live read-only Postgres by schema_dbml.py.
+// 72 tables, 96 foreign keys. Paste into https://dbdiagram.io/d to view.
+
+Table capacity_rating {
+  id int8 [pk]
+  option text
+}
+
+Table captive_industry_type {
+  id int8 [pk]
+  option text
+}
+
+Table captive_industry_use {
+  id int8 [pk]
+  option text
+}
+
+Table captive_non_industry_use {
+  id int8 [pk]
+  option text
+}
+
+Table ccs {
+  id int8 [pk]
+  option text
+}
+
+Table chp {
+  id int8 [pk]
+  option text
+}
+
+Table comment {
+  id int8 [pk]
+  deleted bool [not null]
+  thread_id int8
+  comment text
+  creator_id int4
+  created timestamptz [not null]
+}
+
+Table company {
+  id int8 [pk]
+  name text
+  name_local text
+  name_search text
+  country_id int8
+  subdivision_id int8
+  "entityType_id" int8
+  "publiclyListed" text
+  abbreviation text
+  "legalEntityType_id" int8
+  "nameOther" jsonb
+  notes text
+  deleted bool [not null]
+  modified timestamptz [not null]
+  modified_by_id int4
+  "entityJSON" jsonb
+  "ultimateParent" bool
+  "ultimateParentRationale_id" int8
+  homepage text
+  headquarters_country_id int8
+  headquarters_subdivision_id int8
+  "deletedTimestamp" timestamptz
+  "endOfBranches" text
+  "endOfBranchesIds" text
+  "gemParents" text
+  "gemParentsIds" text
+  defunct bool
+  "mergersAcquisitions" text
+  "entityStatusDatasource" jsonb
+  "mergedInto" int8
+  "entityStatus_id" int8
+  tag_id int8
+  created timestamptz [not null]
+  "jointVenture" text
+  "gemParentsJSON" text
+  "endOfBranchesJSON" text
+}
+
+Table company_owner {
+  id int8 [pk]
+  share numeric
+  "shareDatasource" jsonb
+  company_id int8 [not null]
+  owner_id int8 [not null]
+  "shareRange" text
+}
+
+Table country {
+  id int8 [pk]
+  "isoName" text
+  "gemName" text
+  "isoCode" text
+  territory text
+  "territoryOf" text
+  "isoCodeAlpha2" text
+  "isoCodeAlpha3" text
+  "sameAsIso" text
+  region text
+  "subRegion" text
+  "weoRegion" text
+}
+
+Table country_subdivision {
+  id int8 [pk]
+  "isoCode" text
+  "subdivisionIsoCode" text
+  name text
+  category text
+}
+
+Table data_source {
+  id int8 [pk]
+  url text
+  "shortName" text [not null]
+  "pageTitle" text
+  "pageAuthor" text
+  "websiteTitle" text
+  "publicationDate" text
+  "accessDate" text
+  "urlArchived" text
+  "archivedDate" text
+  "urlStatus" text
+  "urlWithQuery" text
+  "urlNoQuery" text
+  created timestamptz [not null]
+}
+
+Table datahub_release {
+  id int8 [pk]
+  folder text [not null]
+  release_date date
+  notes text [not null]
+  created timestamptz [not null]
+  modified timestamptz [not null]
+  created_by text [not null]
+  tracker_id int8 [not null]
+}
+
+Table datahub_releasefile {
+  id int8 [pk]
+  filename text [not null]
+  slug text [not null]
+  size int8
+  s3_last_modified timestamptz
+  uploaded_at timestamptz
+  uploaded_by text [not null]
+  release_id int8 [not null]
+  category text [not null]
+}
+
+Table datahub_tracker {
+  id int8 [pk]
+  prefix text [not null]
+  name text [not null]
+  tracker_code text [not null]
+}
+
+Table entity_history {
+  id int8 [pk]
+  "entityJSON" jsonb
+  modified timestamptz [not null]
+  editor_id int4
+  entity_id int8 [not null]
+}
+
+Table entity_org_id {
+  id int8 [pk]
+  entity_id int8
+  "orgId_id" int8
+  value text
+  datasource text
+}
+
+Table entity_status {
+  id int8 [pk]
+  status text
+}
+
+Table entity_tag {
+  id int8 [pk]
+  name text [not null]
+}
+
+Table entity_type {
+  id int8 [pk]
+  type text
+}
+
+Table entity_update {
+  id int8 [pk]
+  "lastUpdated" date
+  entity_id int8
+  "researchStatus_id" int8
+  updater_id int4
+}
+
+Table external_id_system {
+  id int8 [pk]
+  name text [not null]
+  region text
+}
+
+Table fuel_category {
+  id int8 [pk]
+  name text [not null]
+}
+
+Table fuel_detail {
+  id int8 [pk]
+  detail text [not null]
+  category_id int8 [not null]
+}
+
+Table goget_project {
+  id int8 [pk]
+  "basinDatasource" jsonb
+  "concessionBlockDatasource" jsonb
+  "projectComplexDatasource" jsonb
+  offshore text
+  "offshoreDatasource" jsonb
+  "productionType" text
+  "productionTypeDatasource" jsonb
+  "fuelType" text
+  "unitType" text
+  basin text
+  "concessionBlock" text
+  project_id int8 [not null]
+  "projectComplex_id" int8
+  "makeWIKI" bool
+  "namePrefix" text
+  "concessionBlock2" text
+  "concessionBlock3" text
+  "concessionBlock4" text
+  "concessionBlock5" text
+  "concessionBlock6" text
+  "concessionBlock7" text
+  capex int8
+  "capexDatasource" jsonb
+}
+
+Table hydrogen_capable {
+  id int8 [pk]
+  option text
+}
+
+Table hydrogen_generating {
+  id int8 [pk]
+  option text
+}
+
+Table hydrogen_greenwashing {
+  id int8 [pk]
+  option text
+}
+
+Table installation_type {
+  id int8 [pk]
+  option text
+}
+
+Table iron_yearly_production {
+  id int8 [pk]
+  year int4
+  "productionDatasource" jsonb
+  "otherIronProductionQualifier" varchar
+  "totalIronProduction" numeric
+  "BFIronProdQualifier" varchar
+  "BFIronProd" numeric
+  "DRIIronProdQualifier" varchar
+  "DRIIronProd" numeric
+  plant_id int8 [not null]
+  "otherIronProduction" numeric
+}
+
+Table language {
+  id int8 [pk]
+  name text [not null]
+}
+
+Table legal_entity_type {
+  id int8 [pk]
+  type text
+  description text
+  countries jsonb
+}
+
+Table lng_project {
+  id int8 [pk]
+  capacity numeric
+  "capacityUnit" text
+  cost numeric
+  "costUnit" text
+  "costYear" int4
+  "costDatasource" jsonb
+  financing text
+  "financingDatasource" jsonb
+  "LNGSource" jsonb
+  "LNGSourceDatasource" jsonb
+  "powerPlantsSupplied" jsonb
+  "powerPlantsSuppliedDatasource" jsonb
+  pipelines jsonb
+  "pipelinesDatasource" jsonb
+  "pciNotes" text
+  pci3 text
+  pci4 text
+  pci5 text
+  pci6 text
+  offshore bool
+  floating bool
+  "vesselName" jsonb
+  "vesselNameDatasource" jsonb
+  opposition bool
+  "oppositionDatasource" jsonb
+  "esjNotes" text
+  ccs bool
+  "ccsDatasource" jsonb
+  "ccsNotes" text
+  project_id int8 [not null]
+  "capacityDatasource" jsonb
+  "oppositionNotes" text
+  "associatedProjects" jsonb
+  "associatedProjectsDatasource" jsonb
+  "captiveGasPower" bool
+  "captiveGasPowerDatasource" jsonb
+}
+
+Table lng_unit {
+  id int8 [pk]
+  fuel text
+  "facilityType" text
+  capacity numeric
+  "capacityUnit" text
+  "researcherNotes" text
+  cost numeric
+  "costUnit" text
+  "costYear" int4
+  "costDatasource" jsonb
+  financing text
+  "financingDatasource" jsonb
+  "tempFacility" text
+  "importExportOnly" bool
+  "fidStatus" text
+  "fidYear" int4
+  "fidDatasource" jsonb
+  defeated bool
+  "defeatedDatasource" jsonb
+  "LH2" bool
+  "NH3" bool
+  "syntheticLNG" bool
+  "retrofitProposed" bool
+  "altFuelDatasource" jsonb
+  "altFuelPrelimAgreement" bool
+  "altFuelPrelimAgreementDatasource" jsonb
+  "altFuelCallMarketInterest" bool
+  "altFuelCallMarketInterestDatasource" jsonb
+  "altFuelNotes" text
+  unit_id int8 [not null]
+  "facilityTypeDatasource" jsonb
+  trains text
+}
+
+Table nuclear_model {
+  id int8 [pk]
+  name text [not null]
+}
+
+Table operator {
+  id int8 [pk]
+  "operatorDatasource" jsonb
+  company_id int8 [not null]
+  plant_id int8
+  powerplant_unit_id int8
+  type text
+  share numeric
+}
+
+Table org_id {
+  id int8 [pk]
+  code text [not null]
+  name text [not null]
+  data jsonb [not null]
+}
+
+Table plant {
+  id int8 [pk]
+  name text [not null]
+  slug varchar [not null]
+  "nameOther" jsonb
+  "wikiUrl" text
+  notes text
+  creator_id int4
+  "plantLevelOwners" bool
+  city text
+  "localArea" text
+  "majorArea" text
+  "plantLevelLocation" bool
+  "streetAddress" text
+  subnational text
+  country_id int8
+  "locationDatasource" jsonb
+  "coordinateFormat" text
+  latitude numeric
+  "latitudeText" text
+  longitude numeric
+  "longitudeText" text
+  "coordinateFormatOther" text
+  "locationAccuracy" text
+  "countrySearch" _int8
+  "fuelCategorySearch" _int8
+  "nameSearch" text
+  "plantJSON" jsonb
+  "subnationalSearch" text
+  "statusSearch" _int8
+  "unitIDSearch" _int8
+  "ownerSearch" _int8
+  "externalIDSearch" text
+  "fuelDetailSearch" _int8
+  "citySearch" text
+  deleted bool [not null]
+  captive bool
+  "captiveIndustryType" jsonb
+  "captiveIndustryUse_id" int8
+  "captiveNonIndustryUse_id" int8
+  "captiveDatasource" jsonb
+  modified timestamptz [not null]
+  modified_by_id int4
+  "projectType" int4 [not null]
+  "plantLevelOperators" bool
+  validation jsonb
+  "employmentNotes" text
+  "employmentNotesDatasource" jsonb
+  "localAreaSearch" text
+  "majorAreaSearch" text
+  "operatorSearch" _int8
+  "deletedTimestamp" timestamptz
+  binational bool
+  city2 text
+  complex text
+  "complexDatasource" jsonb
+  country2_id int8
+  "localArea2" text
+  "majorArea2" text
+  "streetAddress2" text
+  subnational2 text
+  "projectLinkDatasource" jsonb
+  country3_id int8
+  country4_id int8
+  country5_id int8
+  country6_id int8
+  country7_id int8
+  multinational bool
+  "subnationalLookup_id" int8
+  "subnational2Lookup_id" int8
+  "subnationalChecked" bool [not null]
+  "subnationalServiceResults_id" int8
+  "subnational2ServiceResults_id" int8
+  "backupPower" bool
+  "backupPowerDatasource" jsonb
+  "plantJSON_z" bytea
+}
+
+Table plant_external_id {
+  id int8 [pk]
+  "externalId" text
+  "idSystem_id" int8
+  plant_id int8
+}
+
+Table plant_history {
+  id int8 [pk]
+  "plantJSON" jsonb
+  editor_id int4
+  plant_id int8 [not null]
+  modified timestamptz [not null]
+}
+
+Table plant_language {
+  id int8 [pk]
+  name text
+  "wikiUrl" text
+  language_id int8
+  plant_id int8
+}
+
+Table plant_owner {
+  id int8 [pk]
+  share numeric
+  "shareDatasource" jsonb
+  company_id int8 [not null]
+  plant_id int8
+  powerplant_unit_id int8
+  "impliedShare" numeric
+}
+
+Table powerplant_unit {
+  id int8 [pk]
+  name text [not null]
+  capacity numeric
+  "capacityDatasource" jsonb
+  plant_id int8 [not null]
+  technology jsonb
+  city text
+  "coordinateFormat" text
+  "coordinateFormatOther" text
+  latitude numeric
+  "latitudeText" text
+  "localArea" text
+  "locationAccuracy" text
+  "locationDatasource" jsonb
+  longitude numeric
+  "longitudeText" text
+  "majorArea" text
+  "streetAddress" text
+  subnational text
+  status_id int8
+  "fuelDatasource" jsonb
+  "statusDatasource" jsonb
+  "technologyDatasource" jsonb
+  "endYearDatasource" jsonb
+  "endYearHigh" int4
+  "endYearLow" int4
+  "endYearPlanned" bool
+  "startYearDatasource" jsonb
+  "startYearHigh" int4
+  "startYearLow" int4
+  "startYearPlanned" bool
+  "citySearch" text
+  "countrySearch" int8
+  "externalIDSearch" text
+  "fuelCategorySearch" _int8
+  "fuelDetailSearch" _int8
+  "ownerSearch" _int8
+  "unitJSON" jsonb
+  "subnationalSearch" text
+  "ccsAttachment_id" int8
+  "ccsDatasource" jsonb
+  "hydrogenCapable_id" int8
+  "hydrogenCapableDatasource" jsonb
+  "hydrogenGreenwashing_id" int8
+  "hydrogenNotes" text
+  "capacityPerEngine" numeric
+  "numberOfEngines" int4
+  "fuelConversion" bool
+  "lastUpdatedSearch" text
+  "statusDetail" text
+  chp_id int8
+  "chpDatasource" jsonb
+  "coalSource" text
+  "permitDetails" text
+  permitted bool
+  "permitMonth" int4
+  "permitDay" int4
+  "permitYear" int4
+  "permitDatasource" jsonb
+  "capacityRating_id" int8
+  "installationType_id" int8
+  "capacityRatingDatasource" jsonb
+  "installationTypeDatasource" jsonb
+  "hydrogenProducing" bool
+  "hydrogenProducingDatasource" jsonb
+  "latestActivityDatasource" jsonb
+  "latestActivityDay" int4
+  "latestActivityMonth" int4
+  "latestActivityYear" int4
+  "operatorPrimary_id" int8
+  "operatorSearch" _int8
+  "ownerPrimary_id" int8
+  "nameLocal" text
+  "localAreaSearch" text
+  "majorAreaSearch" text
+  "nameSearch" text
+  deleted bool [not null]
+  "deletedTimestamp" timestamptz
+  "researchStatusSearch_id" int8
+  "researcherSearch_id" int4
+  "cancellationYear" int4
+  "constructionStartDay" int4
+  "constructionStartMonth" int4
+  "constructionStartYear" int4
+  "designNetCapacity" numeric
+  "designNetCapacityDatasource" jsonb
+  "endYearDay" int4
+  "endYearMonth" int4
+  "firstCriticalityDay" int4
+  "firstCriticalityMonth" int4
+  "firstCriticalityYear" int4
+  "firstGridConnectionDay" int4
+  "firstGridConnectionMonth" int4
+  "firstGridConnectionYear" int4
+  "referenceNetCapacity" numeric
+  "referenceNetCapacityDatasource" jsonb
+  "startYearDay" int4
+  "startYearMonth" int4
+  "thermalCapacity" numeric
+  "thermalCapacityDatasource" jsonb
+  "cancellationYearDatasource" jsonb
+  "constructionStartDatasource" jsonb
+  "firstGridConnectionDatasource" jsonb
+  "firstCriticalityDatasource" jsonb
+  "nuclearModel_id" int8
+  "nuclearModelDatasource" jsonb
+  "trackerSearch" text
+  "turbineDatasource" jsonb
+  "hydrogenGenerating_id" int8
+  "fuelConversionInitialUnit_id" int8
+  "associatedStorage" bool
+  "associatedStorageDatasource" jsonb
+  "fuelConversionUnknown" bool
+  "partialCapacity1" numeric
+  "partialCapacity2" numeric
+  turbine text
+  watercourse text
+  "watercourseDatasource" jsonb
+  "H2CriteriaDatasource" jsonb
+  "colocatedWithProduction" text
+  "contractH2Supply" text
+  "financingH2Supply" text
+  "H2ReadyTurbine" int4
+  "MOUH2Supply" text
+  "percentageBlending" int4
+  "overdueRetired" bool
+  "overdueStart" bool
+  "plannedRetiredDatasource" jsonb
+  "plannedRetiredYear" int4
+  "plannedStartDatasource" jsonb
+  "plannedStartYear" int4
+  "statusSearch" text
+  irp bool
+  captive bool
+  "captiveDatasource" jsonb
+  "captiveIndustryType" jsonb
+  "captiveIndustryUse_id" int8
+  "captiveNonIndustryUse_id" int8
+  "disruptedDueToConflict" bool
+  "disruptedDueToConflictDatasource" jsonb
+  "subnationalLookup_id" int8
+  "subnationalChecked" bool [not null]
+  "subnationalServiceResults_id" int8
+  "dataCenterPPA" text
+  "dataCenterPPADatasource" jsonb
+  "backupPower" bool
+  "backupPowerDatasource" jsonb
+  "coalSourceCategory" text
+  minemouth bool
+  "unitJSON_z" bytea
+  "numberOfTurbines" int4
+  "numberOfTurbinesDatasource" jsonb
+}
+
+Table project_country_subdivision {
+  id int8 [pk]
+  "subdivisionIsoCode" text
+  name text
+  "nameLocalVariation" text
+  category text
+  "latestIsoUpdate" date
+  "boundarySource" text
+  latitude numeric
+  longitude numeric
+  country_id int8
+}
+
+Table project_geospatial {
+  id int8 [pk]
+  wkt text
+  created timestamptz [not null]
+  modified timestamptz [not null]
+  project_id int8 [not null]
+}
+
+Table project_link_types {
+  id int8 [pk]
+  code text [not null]
+  "sourceTracker" text
+  "destinationTracker" text
+  "sourceShortName" text
+  "destinationShortName" text
+  "sourceLongName" text
+  "destinationLongName" text
+  "outOfDatabase" text
+  "onlyCountry" text
+  "lngFacilityType" text
+  reciprocal_id int8
+}
+
+Table project_links {
+  id int8 [pk]
+  "linkedProjectText" text
+  project_id int8
+  "linkedProject_id" int8
+  "linkType_id" int8
+  "projectLinkDatasource" jsonb
+}
+
+Table project_type {
+  id int8 [pk]
+  name text [not null]
+}
+
+Table project_update {
+  id int8 [pk]
+  "lastUpdated" date
+  project_id int8
+  "researchStatus_id" int8
+  updater_id int4
+}
+
+Table quantity_unit {
+  id int8 [pk]
+  name text
+  description text
+  unit text
+  common_unit text
+  conversion_factor numeric
+  production_reserves text
+}
+
+Table relining_cost_unit {
+  id int8 [pk]
+  option text [not null]
+}
+
+Table relining_details {
+  id int8 [pk]
+  "reliningStatusDatasource" jsonb
+  "reliningFullPartial" text
+  "reliningStartDay" int4
+  "reliningStartMonth" int4
+  "reliningStartYear" int4
+  "reliningStopDay" int4
+  "reliningStopMonth" int4
+  "reliningStopYear" int4
+  "reliningDuration" int4
+  "reliningNumber" int4
+  "reliningCost" numeric
+  "reliningInvestmentDay" int4
+  "reliningInvestmentMonth" int4
+  "reliningInvestmentYear" int4
+  "reliningCapacityExpansion" numeric
+  "reliningCapacityExpansionUnit" text
+  "reliningCostUnit_id" int8
+  "reliningStatus" text
+  unit_id int8
+  "reliningDatasource" jsonb
+}
+
+Table research_status {
+  id int8 [pk]
+  option text
+}
+
+Table reserve_type {
+  id int8 [pk]
+  name text
+}
+
+Table reserves_production {
+  id int8 [pk]
+  "productionReserves" text
+  "fuelDesc" text
+  "reserveClassification" text
+  quantity numeric
+  "quantityUnit" text
+  year int4
+  "reserveProductionDatasource" jsonb
+  notes text
+  project_id int8 [not null]
+}
+
+Table status {
+  id int8 [pk]
+  name text [not null]
+  order int4 [not null]
+}
+
+Table status_timeline {
+  id int8 [pk]
+  order int4 [not null]
+  status text
+  substatus text
+  "statusDatasource" jsonb
+  year int4
+  "monthOrHalfYear" text
+  unit_id int8 [not null]
+  created timestamptz [not null]
+  modified timestamptz [not null]
+  delayed bool
+  notes text
+}
+
+Table steel_product {
+  id int8 [pk]
+  product text
+}
+
+Table steel_project {
+  id int8 [pk]
+  "technologyTransition" bool
+  "wikiBackgroundLastUpdatedYear" int4
+  "wikiBackgroundLastUpdatedMonth" int4
+  "wikiBackgroundLastUpdatedDay" int4
+  "localLanguageAddress" text
+  "companyWebsite" text
+  "wikipediaURL" text
+  "IPEPageURL" text
+  "baiduBaikuURL" text
+  "announcedDay" int4
+  "announcedMonth" int4
+  "announcedYear" int4
+  "announcedDateDatasource" jsonb
+  "constructionDay" int4
+  "constructionMonth" int4
+  "constructionYear" int4
+  "constructionDateDatasource" jsonb
+  "startDay" int4
+  "startMonth" int4
+  "startYear" int4
+  "startDateDatasource" jsonb
+  "preretireAnnouncedDay" int4
+  "preretireAnnouncedMonth" int4
+  "preretireAnnouncedYear" int4
+  "preretireAnnouncedDateDatasource" jsonb
+  "idledDay" int4
+  "idledMonth" int4
+  "idledYear" int4
+  "idledDateDatasource" jsonb
+  "retiredDay" int4
+  "retiredMonth" int4
+  "retiredYear" int4
+  "retiredDateDatasource" jsonb
+  "ferronickelCapacityQualifier" varchar
+  "ferronickelCapacity" int4
+  "ferronickelCapacityDatasource" jsonb
+  "sinterCapacityQualifier" varchar
+  "sinterCapacity" int4
+  "sinterCapacityDatasource" jsonb
+  "cokingCapacityQualifier" varchar
+  "cokingCapacity" int4
+  "cokingCapacityDatasource" jsonb
+  "pelletizingPlantCapacityQualifier" varchar
+  "pelletizingPlantCapacity" int4
+  "pelletizingPlantCapacityDatasource" jsonb
+  "steelProductCategory" jsonb
+  "steelProductCategoryDatasource" jsonb
+  "steelProduct" jsonb
+  "steelProductDatasource" jsonb
+  "endUsers" jsonb
+  "endUsersDatasource" jsonb
+  "workforceSize" int4
+  "workforceSizeDatasource" jsonb
+  "ISO14001Qualifier" text
+  "ISO14001Day" int4
+  "ISO14001Month" int4
+  "ISO14001Year" int4
+  "ISO14001Datasource" jsonb
+  "ISO50001Qualifier" text
+  "ISO50001Day" int4
+  "ISO50001Month" int4
+  "ISO50001Year" int4
+  "ISO50001Datasource" jsonb
+  "responsibleSteelDay" int4
+  "responsibleSteelMonth" int4
+  "responsibleSteelYear" int4
+  "responsibleSteelDatasource" jsonb
+  "auxiliaryProductionEquipment" text
+  "auxiliaryProductionEquipmentDatasource" jsonb
+  "powerSource" text
+  "powerSourceDatasource" jsonb
+  "ironOreSource" text
+  "ironOreSourceDatasource" jsonb
+  "metCoalSource" text
+  "metCoalSourceDatasource" jsonb
+  "ESJIssues" text
+  "ESJIssuesDatasource" jsonb
+  project_id int8 [not null]
+  "excludedNotes" text
+  "isExcluded" bool
+  "responsibleSteelQualifier" text
+  "capacitySwap" bool
+  "stainlessSteel" bool
+  "carbonMarket" bool
+  "carbonMarketName" text
+}
+
+Table steel_unit {
+  id int8 [pk]
+  "unitNotes" text
+  capacity numeric
+  "announcedDay" int4
+  "announcedMonth" int4
+  "announcedYear" int4
+  "announcedDateDatasource" jsonb
+  "constructionDay" int4
+  "constructionMonth" int4
+  "constructionYear" int4
+  "constructionDateDatasource" jsonb
+  "startDay" int4
+  "startMonth" int4
+  "startYear" int4
+  "startDateDatasource" jsonb
+  "preretireAnnouncedDay" int4
+  "preretireAnnouncedMonth" int4
+  "preretireAnnouncedYear" int4
+  "preretireAnnouncedDateDatasource" jsonb
+  "idledDay" int4
+  "idledMonth" int4
+  "idledYear" int4
+  "idledDateDatasource" jsonb
+  "retiredDay" int4
+  "retiredMonth" int4
+  "retiredYear" int4
+  "retiredDateDatasource" jsonb
+  "furnaceSize" numeric
+  "furnaceSizeUnit" text
+  "furnaceSizeDatasource" jsonb
+  "furnaceManufacturer" text
+  "furnaceManufacturerDatasource" jsonb
+  "furnaceModel" text
+  "furnaceModelDatasource" jsonb
+  "scrapBased" text
+  "scrapBasedDatasource" jsonb
+  "percentScrapQualifier" varchar
+  "percentScrap" numeric
+  "percentScrapDatasource" jsonb
+  "percentDRIQualifier" varchar
+  "percentDRI" numeric
+  "percentHBIQualifier" varchar
+  "percentHBI" numeric
+  "percentSpongeIronQualifier" varchar
+  "percentSpongeIron" numeric
+  "percentBasicPigIronQualifier" varchar
+  "percentBasicPigIron" numeric
+  "percentGranulatedPigIronQualifier" varchar
+  "percentGranulatedPigIron" numeric
+  "percentPigIronQualifier" varchar
+  "percentPigIron" numeric
+  "percentOtherIronQualifier" varchar
+  "percentOtherIron" numeric
+  "percentDatasource" jsonb
+  granularity text
+  "carbonCapture" text
+  "carbonCaptureDatasource" jsonb
+  "decarbonizationTechnology" text
+  "decarbonizationTechnologyDatasource" jsonb
+  "DRIFurnaceTypeDatasource" jsonb
+  "reductantDatasource" jsonb
+  "currentHydrogenReductantColorDatasource" jsonb
+  "hydrogenReductantStatusDatasource" jsonb
+  "hydrogenReductantConversionDay" int4
+  "hydrogenReductantConversionMonth" int4
+  "hydrogenReductantConversionYear" int4
+  "hydrogenReductantConversionDatasource" jsonb
+  "futureHydrogenReductantColorDatasource" jsonb
+  "furnaceHeight" numeric
+  "furnaceDiameter" numeric
+  "furnaceVolumeType" text
+  "DRIFurnaceType" text
+  "calculationMethod" text
+  "currentHydrogenReductantColor" text
+  "futureHydrogenReductantColor" text
+  "hydrogenReductantStatus" text
+  reductant text
+  unit_id int8 [not null]
+  "unitType" text
+  "steelTechnology" text
+  "DRIHBISource" text
+  "gasReductant" text
+  "hydrogenReductantConversionAnnounced" bool
+  "reductantType" text
+}
+
+Table steel_yearly_production {
+  id int8 [pk]
+  year int4
+  "productionDatasource" jsonb
+  "otherSteelProductionQualifier" varchar
+  "totalSteelProduction" numeric
+  "BOFSteelProdQualifier" varchar
+  "BOFSteelProd" numeric
+  "EAFSteelProdQualifier" varchar
+  "EAFSteelProd" numeric
+  "OHFSteelProdQualifier" varchar
+  "OHFSteelProd" numeric
+  plant_id int8 [not null]
+  "otherSteelProduction" numeric
+  "IFSteelProd" numeric
+  "IFSteelProdQualifier" varchar
+}
+
+Table technology {
+  id int8 [pk]
+  name text [not null]
+}
+
+Table technology_fuel_category {
+  id int4 [pk]
+  technology_id int8 [not null]
+  fuelcategory_id int8 [not null]
+}
+
+Table thread {
+  id int8 [pk]
+  completed bool [not null]
+  element text
+  deleted bool [not null]
+  assignee_id int4
+  project_id int8
+  created timestamptz [not null]
+  modified timestamptz [not null]
+  entity_id int8
+}
+
+Table turbine_manufacturer {
+  id int8 [pk]
+  option text
+  deleted bool [not null]
+}
+
+Table ultimate_parent_rationale {
+  id int8 [pk]
+  option text
+}
+
+Table unit_external_id {
+  id int8 [pk]
+  "externalId" text
+  "idSystem_id" int8
+  unit_id int8
+}
+
+Table unit_fuel {
+  id int8 [pk]
+  category_id int8
+  detail_id int8
+  powerplant_unit_id int8
+  primary bool
+  percentage numeric
+  "startYear" text
+  status_id int8
+  timepoint text
+}
+
+Table unit_replacement {
+  id int8 [pk]
+  "unitReplacementId" int8
+  unit_id int8
+  "unitReplacementType_id" int8
+  "unitReplacementDatasource" jsonb
+}
+
+Table unit_replacement_type {
+  id int8 [pk]
+  option text
+}
+
+Table unit_turbine {
+  id int8 [pk]
+  model text
+  "turbineManufacturer_id" int8
+  unit_id int8
+}
+
+Table unit_update {
+  id int8 [pk]
+  "lastUpdated" date
+  "researchStatus_id" int8
+  updater_id int4
+  unit_id int8
+}
+
+TableGroup core_project {
+  plant
+  powerplant_unit
+  status_timeline
+  operator
+  plant_owner
+  plant_language
+  plant_external_id
+  unit_external_id
+  project_geospatial
+  project_links
+  project_update
+  unit_update
+  project_country_subdivision
+  thread
+  comment
+  plant_history
+}
+
+TableGroup entity_company {
+  company
+  company_owner
+  entity_history
+  entity_org_id
+  entity_status
+  entity_tag
+  entity_type
+  entity_update
+  org_id
+  ultimate_parent_rationale
+  legal_entity_type
+}
+
+TableGroup lng {
+  lng_project
+  lng_unit
+}
+
+TableGroup goget {
+  goget_project
+  reserves_production
+  reserve_type
+}
+
+TableGroup steel_iron {
+  steel_project
+  steel_unit
+  steel_product
+  steel_yearly_production
+  iron_yearly_production
+  relining_details
+  relining_cost_unit
+}
+
+TableGroup power_combustion {
+  unit_fuel
+  unit_turbine
+  turbine_manufacturer
+  fuel_category
+  fuel_detail
+  technology
+  technology_fuel_category
+  capacity_rating
+  chp
+  ccs
+  captive_industry_type
+  captive_industry_use
+  captive_non_industry_use
+  hydrogen_capable
+  hydrogen_generating
+  hydrogen_greenwashing
+  nuclear_model
+  installation_type
+  unit_replacement
+  unit_replacement_type
+}
+
+TableGroup reference {
+  country
+  country_subdivision
+  language
+  status
+  data_source
+  external_id_system
+  project_type
+  quantity_unit
+  research_status
+  project_link_types
+}
+
+TableGroup datahub {
+  datahub_release
+  datahub_releasefile
+  datahub_tracker
+}
+
+Ref: comment.thread_id > thread.id
+Ref: company.country_id > country.id
+Ref: company."entityStatus_id" > entity_status.id
+Ref: company."entityType_id" > entity_type.id
+Ref: company.headquarters_country_id > country.id
+Ref: company.headquarters_subdivision_id > country_subdivision.id
+Ref: company."legalEntityType_id" > legal_entity_type.id
+Ref: company.subdivision_id > country_subdivision.id
+Ref: company.tag_id > entity_tag.id
+Ref: company."ultimateParentRationale_id" > ultimate_parent_rationale.id
+Ref: company_owner.company_id > company.id
+Ref: company_owner.owner_id > company.id
+Ref: datahub_release.tracker_id > datahub_tracker.id
+Ref: datahub_releasefile.release_id > datahub_release.id
+Ref: entity_history.entity_id > company.id
+Ref: entity_org_id.entity_id > company.id
+Ref: entity_org_id."orgId_id" > org_id.id
+Ref: entity_update.entity_id > company.id
+Ref: entity_update."researchStatus_id" > research_status.id
+Ref: fuel_detail.category_id > fuel_category.id
+Ref: goget_project."projectComplex_id" > plant.id
+Ref: goget_project.project_id > plant.id
+Ref: iron_yearly_production.plant_id > plant.id
+Ref: lng_project.project_id > plant.id
+Ref: lng_unit.unit_id > powerplant_unit.id
+Ref: operator.company_id > company.id
+Ref: operator.plant_id > plant.id
+Ref: operator.powerplant_unit_id > powerplant_unit.id
+Ref: plant."captiveIndustryUse_id" > captive_industry_use.id
+Ref: plant."captiveNonIndustryUse_id" > captive_non_industry_use.id
+Ref: plant.country2_id > country.id
+Ref: plant.country3_id > country.id
+Ref: plant.country4_id > country.id
+Ref: plant.country5_id > country.id
+Ref: plant.country6_id > country.id
+Ref: plant.country7_id > country.id
+Ref: plant.country_id > country.id
+Ref: plant."subnational2Lookup_id" > project_country_subdivision.id
+Ref: plant."subnational2ServiceResults_id" > project_country_subdivision.id
+Ref: plant."subnationalLookup_id" > project_country_subdivision.id
+Ref: plant."subnationalServiceResults_id" > project_country_subdivision.id
+Ref: plant_external_id."idSystem_id" > external_id_system.id
+Ref: plant_external_id.plant_id > plant.id
+Ref: plant_history.plant_id > plant.id
+Ref: plant_language.language_id > language.id
+Ref: plant_language.plant_id > plant.id
+Ref: plant_owner.company_id > company.id
+Ref: plant_owner.plant_id > plant.id
+Ref: plant_owner.powerplant_unit_id > powerplant_unit.id
+Ref: powerplant_unit."capacityRating_id" > capacity_rating.id
+Ref: powerplant_unit."captiveIndustryUse_id" > captive_industry_use.id
+Ref: powerplant_unit."captiveNonIndustryUse_id" > captive_non_industry_use.id
+Ref: powerplant_unit."ccsAttachment_id" > ccs.id
+Ref: powerplant_unit.chp_id > chp.id
+Ref: powerplant_unit."fuelConversionInitialUnit_id" > powerplant_unit.id
+Ref: powerplant_unit."hydrogenCapable_id" > hydrogen_capable.id
+Ref: powerplant_unit."hydrogenGenerating_id" > hydrogen_generating.id
+Ref: powerplant_unit."hydrogenGreenwashing_id" > hydrogen_greenwashing.id
+Ref: powerplant_unit."installationType_id" > installation_type.id
+Ref: powerplant_unit."nuclearModel_id" > nuclear_model.id
+Ref: powerplant_unit."operatorPrimary_id" > company.id
+Ref: powerplant_unit."ownerPrimary_id" > company.id
+Ref: powerplant_unit.plant_id > plant.id
+Ref: powerplant_unit."researchStatusSearch_id" > research_status.id
+Ref: powerplant_unit.status_id > status.id
+Ref: powerplant_unit."subnationalLookup_id" > project_country_subdivision.id
+Ref: powerplant_unit."subnationalServiceResults_id" > project_country_subdivision.id
+Ref: project_country_subdivision.country_id > country.id
+Ref: project_geospatial.project_id > plant.id
+Ref: project_link_types.reciprocal_id > project_link_types.id
+Ref: project_links."linkType_id" > project_link_types.id
+Ref: project_links."linkedProject_id" > plant.id
+Ref: project_links.project_id > plant.id
+Ref: project_update.project_id > plant.id
+Ref: project_update."researchStatus_id" > research_status.id
+Ref: relining_details."reliningCostUnit_id" > relining_cost_unit.id
+Ref: relining_details.unit_id > powerplant_unit.id
+Ref: reserves_production.project_id > plant.id
+Ref: status_timeline.unit_id > powerplant_unit.id
+Ref: steel_project.project_id > plant.id
+Ref: steel_unit.unit_id > powerplant_unit.id
+Ref: steel_yearly_production.plant_id > plant.id
+Ref: thread.entity_id > company.id
+Ref: thread.project_id > plant.id
+Ref: unit_external_id."idSystem_id" > external_id_system.id
+Ref: unit_external_id.unit_id > powerplant_unit.id
+Ref: unit_fuel.category_id > fuel_category.id
+Ref: unit_fuel.detail_id > fuel_detail.id
+Ref: unit_fuel.powerplant_unit_id > powerplant_unit.id
+Ref: unit_fuel.status_id > status.id
+Ref: unit_replacement."unitReplacementType_id" > unit_replacement_type.id
+Ref: unit_replacement.unit_id > powerplant_unit.id
+Ref: unit_turbine."turbineManufacturer_id" > turbine_manufacturer.id
+Ref: unit_turbine.unit_id > powerplant_unit.id
+Ref: unit_update."researchStatus_id" > research_status.id
+Ref: unit_update.unit_id > powerplant_unit.id
