@@ -3,6 +3,8 @@
 *.colmap.json
 archive/
 goget/gem_export_goget_tables/
+ggit/gem_export_*
+goit/gem_export_*
 
 # credentials
 .env

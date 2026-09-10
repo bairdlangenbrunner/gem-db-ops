@@ -21,10 +21,13 @@ Usage:
     python pull.py --output my.csv      # custom path
     python pull.py --map-only           # skip fetch; derive map from existing CSV
     python pull.py --limit 30           # small sample (plant limit, for testing)
+
+The expected-column map and the derive/report/save logic live in
+../gem_colmap.py so every tracker pull (and every consumer repo) uses one copy.
+Since 2026-08-11 this colmap carries canonical short names and drift detection,
+like the LNG one — it used to be a bare {header: index} map.
 """
 import argparse
-import csv
-import json
 import sys
 from pathlib import Path
 
@@ -32,7 +35,12 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
 
+import gem_colmap  # noqa: E402
+
 DEFAULT_OUT = HERE / "gem_export_gogpt.csv"
+
+# Canonical short name -> expected header text. Defined in ../gem_colmap.py.
+EXPECTED_COLUMNS = gem_colmap.GOGPT_EXPECTED_COLUMNS
 
 
 def pull_postgres(out_path: Path, limit=None):
@@ -46,23 +54,6 @@ def pull_postgres(out_path: Path, limit=None):
     print(f"  wrote {n:,} unit rows to {out_path}", file=sys.stderr)
 
 
-def derive_column_map(csv_path: Path):
-    """Read header row, return {header: 0-indexed-column}. Generic (no canonical
-    expected-column set is maintained for GOGPT here); re-derive every pull so
-    downstream code never hard-codes offsets."""
-    with open(csv_path, encoding="utf-8") as f:
-        try:
-            header = next(csv.reader(f))
-        except StopIteration:
-            sys.exit(f"ERROR: empty CSV at {csv_path}")
-    if header and header[0].startswith("\ufeff"):
-        header[0] = header[0][1:]
-    return {
-        "_total_columns": len(header),
-        "columns": {h.strip(): i for i, h in enumerate(header)},
-    }
-
-
 def main():
     p = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     p.add_argument("--output", "--out", dest="out", type=Path, default=DEFAULT_OUT)
@@ -74,11 +65,7 @@ def main():
     if not args.map_only:
         pull_postgres(args.out, limit=args.limit)
 
-    col_map = derive_column_map(args.out)
-    map_path = args.out.with_suffix(".colmap.json")
-    map_path.write_text(json.dumps(col_map, indent=2))
-    print(f"  {col_map['_total_columns']} columns; column map saved to {map_path}",
-          file=sys.stderr)
+    gem_colmap.derive_report_save(args.out, EXPECTED_COLUMNS)
 
 
 if __name__ == "__main__":

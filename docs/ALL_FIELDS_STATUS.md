@@ -1,9 +1,14 @@
 # GEM "All Fields" LNG + GOGPT Export — Progress Notes
 
-> **2026-07-21 restructure note:** the repo now has per-tracker pull folders
+> **Restructure notes.** 2026-07-21: the repo has per-tracker pull folders
 > (`lng/`, `gogpt/`, `goget/`, each with a `pull.py`); the scripts described
 > below still live at the repo root, and the loose CSV snapshots this file
-> references were moved to `archive/` (gitignored). See `README.md`.
+> references were moved to `archive/` (gitignored). 2026-08-11: the Sheets
+> backend was added (`ggit/`, `goit/`, `gem_sheets.py`) — irrelevant to this
+> file, which is Postgres-only — and column-map derivation plus the canonical
+> `LNG_EXPECTED_COLUMNS` / `GOGPT_EXPECTED_COLUMNS` moved into `gem_colmap.py`,
+> so a column added to `LNG_COLUMNS`/`GOGPT_COLUMNS` here must be added there
+> too. See `README.md` and `docs/CONSUMERS.md`.
 
 Working file for the `gem_query.py --all-fields {lng,gogpt}` mode that reproduces
 the website's denormalized "Export all fields" CSVs.
@@ -62,26 +67,30 @@ python gem_query.py --all-fields lng --limit 30 -o /tmp/lng.csv
 
 ## Accuracy snapshot
 
-Compared against `/Users/baird/Downloads/all-fields-2026-05-22T161115.csv`:
+Compared against `all-fields-2026-08-28T161944.csv` (the 2026-05-22 download it
+was previously measured against gave 96.46% / 7.93%):
 
 ```
-1261 our rows, 1261 ref rows, 1261 matched by (TerminalID, UnitID)
-96.46% cell match (5,136 / 145,015 cells differ)
-7.93% rows are exact byte-for-byte matches (100 / 1,261)
+1281 our rows, 1281 ref rows, 1281 matched by (TerminalID, UnitID)
+97.83% cell match (3,144 / 144,753 cells differ)
+17.64% rows are exact byte-for-byte matches (226 / 1,281)
 ```
+
+All six **cost value** columns — `Cost`, `CostUnits`, `CostYear`, `CostUSD`,
+`CostEuro`, `TotKnownTerminalCostsUSD` — now reproduce byte-for-byte.
 
 Top diff columns (out of 115) and their root causes:
 
 | Column | % differ | Cause | Status |
 |---|---:|---|---|
 | `Capacity [ref]` | 71% | DB has `powerplant_unit.capacityDatasource` for most units; the website hides it when redundant with a project-level source. Gating rule unknown. | Open |
-| `CostEuro` | 37% | Requires per-year USD→EUR FX rate table. Not implemented. | TODO |
-| `Cost [ref]` | 34% | Same "hide-when-redundant" pattern as Capacity [ref]. | Open |
+| `CostEuro` | 0% | Fixed FX table `CURRENCY_TO_EUR` (year-independent), quantized to 2dp. | Exact |
+| `Cost [ref]` | 10% | Unit source when the unit carries a cost, else the project source. 129 rows whose unit cost *and* source are both populated print nothing on the website, and nothing in the replica separates them from the 333 identical rows that do. | Open |
 | `StartDate [ref]` | 30% | Currently unions datasources of every `status_timeline` row with `status='operating'`. Order/dedup logic differs from website in some cases. | Open |
-| `TotKnownTerminalCostsUSD` | 26% | Sums plant-level `cost` where `costUnit='USD'`. Website may also currency-convert non-USD unit costs. | Partial |
+| `TotKnownTerminalCostsUSD` | 0% | `lng_project.cost` where present (a whole-terminal figure that *overrides*, not merely backfills), else the sum of the non-deleted units' converted costs. | Exact |
 | `State/Province` | 25% | Priority chain: `unit.subnational > plant.subnational > plant.subnationalLookup → country_subdivision.name`. Some rows use website-only locale strings. | Open |
 | `Parent` / `Parent GEM Entity ID` | 18% | Reads `company.gemParents` / `gemParentsIds` from the direct owners. Self-reference fallback handled. Remaining diffs are edge cases in share normalization or multi-owner concatenation. | Mostly done |
-| `CostUSD` | 17% | Populated only when `costUnit='USD'`. Non-USD unit costs need conversion. | TODO |
+| `CostUSD` | 0% | Fixed FX table `CURRENCY_TO_USD`, plus the project-level cost on single-unit terminals. | Exact |
 | `Owner` | 17% | Ordered by `plant_owner.id` ascending; website appears to use a different sort that isn't share/name/id-based. | Open |
 
 The complete dump of diff counts is reproducible by running the diff script in
@@ -119,8 +128,6 @@ The website exports 115 columns. Coverage:
 **Partially working** — see diff table above.
 
 **Not implemented**:
-- `CostEuro` — needs historical USD→EUR rate table per `CostYear`
-- USD conversion for non-USD `CostUSD` and `TotKnownTerminalCostsUSD`
 - `VesselParent` — would require running the company_owner traversal on vessel-owner companies
 - `TotTerminalCost [ref]` — plant-level cost reference aggregate
 
@@ -142,18 +149,39 @@ These are the things I'd want to remember if picking this up later:
    `company.name + " " + legal_entity_type.type` (e.g. "INPEX Masela Ltd"),
    operators are just `company.name` ("INPEX Masela"). Verified against
    multiple rows.
-4. **`operator.type` is a discriminator** — values `operator`, `vessel_operator`,
-   `vessel_owner` split into different display columns.
+4. **`operator.type` is a discriminator** — values `operator`, `vesselOperator`,
+   `vesselOwner` split into different display columns. Note the **camelCase**:
+   testing for `vessel_owner`/`vessel_operator` matches nothing and silently
+   empties both columns. Unlike Owner/Operator, the vessel columns render bare
+   company names — the website never appends the `[NN%]` share even where
+   `operator.share` is populated.
 5. **`plant.subnationalLookup_id` → `project_country_subdivision.name`** is the
    resolved ISO subdivision, but researchers often type a local-language
    variant into `plant.subnational` that the website prefers. The priority
    chain that works most reliably is `plant.subnational > unitJSON.subnational
    > plant.subnationalLookup`.
-6. **Capacity conversions**: the website uses `bcm = mtpa / 0.735` (equivalent
+6. **The cost model has three levels, and the project level *overrides*.**
+   `lng_unit.cost` is the per-unit figure; `lng_project.cost` is a whole-terminal
+   figure. `TotKnownTerminalCostsUSD` is the project cost wherever one exists,
+   and only otherwise the sum of the units' converted costs — Papua LNG carries a
+   4.5bn AUD unit cost yet totals 18bn USD, its project value. For the per-row
+   `Cost`/`CostUSD`, the project cost stands in only on **single-unit** terminals;
+   pushing it onto each row of a multi-unit terminal would multiply it. And
+   `Cost` itself is the **verbatim JSON string** (`unitJSON->>'cost'`, or
+   `plantJSON->>'cost'` for the project fallback), so `1500000000`,
+   `1500000000.00` and `2.67E+13` all survive as the editor typed them.
+7. **FX is a fixed table, not a per-year one.** The implied rate for each
+   `costUnit` is identical across every `CostYear` in the export, so no
+   historical series is needed. There is no currency table anywhere in the
+   read-only Postgres (72 tables checked), so `CURRENCY_TO_USD` /
+   `CURRENCY_TO_EUR` in `gem_all_fields.py` are reproduced from a download.
+   `CostEuro` has its **own** table — it is not `CostUSD / 1.09`; GBP is 1.156
+   where the derivation would give 1.1559 — and is quantized to 2dp.
+8. **Capacity conversions**: the website uses `bcm = mtpa / 0.735` (equivalent
    to factor 1.36054…), with ROUND_HALF_UP at 2 dp. Not the more common
    industry factor of 1.36 or the IGU value 1.379. For non-mtpa/bcm units, a
    small lookup table covers `bcf/d` (×7.67) and `MMcf/d` (×0.00767).
-7. **Researcher / LastUpdated come from `unit_update`** (latest by `lastUpdated`),
+9. **Researcher / LastUpdated come from `unit_update`** (latest by `lastUpdated`),
    joined to `auth_user`. NOT from `project_update`, which is empty for most
    LNG plants.
 8. **Share formatting differs by column**: Owner shares render as
@@ -194,25 +222,21 @@ These are the things I'd want to remember if picking this up later:
 1. **Owner ordering**: try sorting by `plant_owner.modified` or by `company.id`
    to see if a non-obvious key matches the website. Currently sorts by
    `plant_owner.id` ascending.
-2. **CostUSD / TotKnownTerminalCostsUSD for non-USD costs**: add a small
-   currency lookup table (RMB, EUR, KRW, INR, etc. → approximate USD rate).
-   Even rough static rates would close the gap for many rows.
-3. **State/Province priority**: experiment with prioritizing
+2. **State/Province priority**: experiment with prioritizing
    `subnationalLookup → country_subdivision.name` for *some* countries and
    free-text for others. There may be a pattern by country.
-4. **Status [ref]**: my current code emits the datasource of the *current*
+3. **Status [ref]**: my current code emits the datasource of the *current*
    status row only. The website may emit multiple status datasources.
 
 ### Bigger projects
-1. **`CostEuro`**: needs a per-year USD↔EUR rate table (≈ 30 years × 12
-   months). Source: ECB historical rates or similar. Then convert
-   `cost_usd * rate(cost_year)`.
-2. **Reverse-engineer the `[ref]` hide logic**: for `Capacity [ref]`,
+1. **Reverse-engineer the `[ref]` hide logic**: for `Capacity [ref]`,
    `Cost [ref]`, `Financing [ref]` — when does the website suppress an
-   otherwise-populated value? Best guess: when the reference URL is shared
-   with another source column on the same row. Worth empirically checking by
-   comparing diff rows side-by-side.
-3. **Owner-display sort order**: pull a larger sample and look for a hidden
+   otherwise-populated value? The shared-URL guess was tested on `Cost [ref]`
+   and **falsified** (the 129 suppressed rows split 77/52 on whether their URL
+   also appears in another `[ref]` column, the 333 shown rows 144/189). Nothing
+   in `lng_unit`, `plant`, `data_source` or the JSON snapshots separates the two
+   groups, so the rule is probably not in the read-only replica at all.
+2. **Owner-display sort order**: pull a larger sample and look for a hidden
    ordering signal (creation timestamp on `company`? a JSON-stored display
    order on `plant.plantJSON`?).
 
@@ -294,4 +318,5 @@ Strategy: do all the fetches up front (10-12 queries total, each batched
 across all terminals), build dict-of-dicts lookups, then assemble rows in
 Python. This is faster and simpler than a single mega-JOIN with string_agg.
 
-The CLI wires in at `gem_query.py` near line 855 (search for `args.all_fields`).
+The CLI wires in at `gem_query.py` — search for `args.all_fields` (line numbers
+drift; don't cite one).

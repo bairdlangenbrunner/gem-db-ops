@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -40,6 +41,81 @@ CAPACITY_UNIT_TO_MTPA: dict[str, Decimal] = {
     "bcf/d": Decimal("7.67"),
     "mmcf/d": Decimal("0.00767"),
 }
+
+# Cost currency -> USD. The website converts `cost` from `costUnit` into the
+# CostUSD / CostEuro columns using a FIXED rate table (verified year-independent:
+# the implied rate is identical across every CostYear in the export). The rates
+# are NOT in the read-only Postgres - no currency or FX table exists there - so
+# they are reproduced here, derived exactly from an all-fields download
+# (all-fields-2026-08-28). Covers every `costUnit` value present in lng_unit.
+# An unmapped currency leaves CostUSD/CostEuro blank and warns; add it here.
+CURRENCY_TO_USD: dict[str, Decimal] = {
+    "USD": Decimal("1"),
+    "EUR": Decimal("1.09"),
+    "GBP": Decimal("1.26"),
+    "CAN": Decimal("0.8"),
+    "AUD": Decimal("0.7264"),
+    "LTL": Decimal("0.328"),
+    "MR":  Decimal("0.22"),
+    "BRL": Decimal("0.18"),
+    "RMB": Decimal("0.16"),
+    "SWE": Decimal("0.098"),
+    "NTD": Decimal("0.034"),
+    "THB": Decimal("0.029"),
+    "PHP": Decimal("0.018"),
+    "RUB": Decimal("0.014"),
+    "INR": Decimal("0.013"),
+    "YEN": Decimal("0.0088"),
+    "KRW": Decimal("0.0008"),
+}
+
+# CostEuro has its OWN rate table - it is not CostUSD / 1.09. The EUR rates are
+# roughly the USD rate x 0.9174, but each is independently rounded to 4dp and at
+# least one breaks the derivation (GBP is 1.156, not 1.26 x 0.9174 = 1.1559), so
+# the table has to be explicit. Same provenance as CURRENCY_TO_USD above.
+CURRENCY_TO_EUR: dict[str, Decimal] = {
+    "USD": Decimal("0.9174"),
+    "EUR": Decimal("1"),
+    "GBP": Decimal("1.156"),
+    "CAN": Decimal("0.7339"),
+    "AUD": Decimal("0.6664"),
+    "LTL": Decimal("0.3009"),
+    "MR":  Decimal("0.2018"),
+    "BRL": Decimal("0.1651"),
+    "RMB": Decimal("0.1468"),
+    "SWE": Decimal("0.0899"),
+    "NTD": Decimal("0.0312"),
+    "THB": Decimal("0.0266"),
+    "PHP": Decimal("0.0165"),
+    "RUB": Decimal("0.0128"),
+    "INR": Decimal("0.0119"),
+    "YEN": Decimal("0.0081"),
+    "KRW": Decimal("0.0007"),
+}
+
+_unmapped_currencies: set[str] = set()
+
+
+def _convert_cost(cost, cost_unit, table: dict[str, Decimal]) -> Decimal | None:
+    """Convert a raw cost in `cost_unit` via `table`, or None if unconvertible."""
+    if cost is None:
+        return None
+    code = (cost_unit or "").strip().upper()
+    rate = table.get(code)
+    if rate is None:
+        if code:
+            _unmapped_currencies.add(code)
+        return None
+    return Decimal(cost) * rate
+
+
+def _cost_in_usd(cost, cost_unit) -> Decimal | None:
+    return _convert_cost(cost, cost_unit, CURRENCY_TO_USD)
+
+
+def _cost_in_eur(cost, cost_unit) -> Decimal | None:
+    return _convert_cost(cost, cost_unit, CURRENCY_TO_EUR)
+
 
 # Prefixes used by the website to render integer DB ids.
 # LNG calls the project a "Terminal" (T); GOGPT calls it a "location" (L).
@@ -131,6 +207,11 @@ def _fmt_fixed2(x) -> str:
     if x is None:
         return ""
     return f"{Decimal(x):.2f}"
+
+
+def _round2(x):
+    """Quantize to 2dp - the precision the website renders CostEuro at."""
+    return None if x is None else Decimal(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _fmt_min1dp(x) -> str:
@@ -373,6 +454,7 @@ def _fetch_plants(engine: Engine, limit: int | None) -> list[dict]:
             p."plantJSON"->>'longitude' AS plant_lon_str,
             p."plantJSON"->>'city' AS plant_city_json,
             p."plantJSON"->>'subnational' AS plant_subnational_json,
+            p."plantJSON"->>'cost' AS plant_cost_raw,
             p."plantJSON"->>'locationAccuracy' AS plant_accuracy_json,
             p."plantLevelOwners" AS plant_level_owners,
             p."plantLevelOperators" AS plant_level_operators,
@@ -418,6 +500,7 @@ def _fetch_units(engine: Engine, plant_ids: list[int]) -> list[dict]:
             pu."unitJSON"->>'longitude' AS unit_lon_str,
             pu."unitJSON"->>'city' AS unit_city_json,
             pu."unitJSON"->>'subnational' AS unit_subnational_json,
+            pu."unitJSON"->>'cost' AS unit_cost_raw,
             pu."unitJSON"->>'locationAccuracy' AS unit_accuracy_json,
             pu."locationDatasource" AS unit_location_ds,
             lu.id AS lng_unit_id,
@@ -466,6 +549,10 @@ def _fetch_lng_projects(engine: Engine, plant_ids: list[int]) -> dict[int, dict]
             capacity AS proj_capacity,
             "capacityUnit" AS proj_capacity_unit,
             "capacityDatasource" AS capacity_ds,
+            cost AS proj_cost,
+            "costUnit" AS proj_cost_unit,
+            "costYear" AS proj_cost_year,
+            "costDatasource" AS proj_cost_ds,
             "LNGSource" AS lng_source,
             "LNGSourceDatasource" AS lng_source_ds,
             "powerPlantsSupplied" AS pps,
@@ -891,8 +978,10 @@ def _build_row(plant: dict, unit: dict, lng_proj: dict | None, ctx: dict) -> dic
     # main operator (type='operator') from vessel-specific roles. Each rolls up
     # into a different column on the website.
     main_operators = [o for o in all_operators if (o.get("type") or "operator") == "operator"]
-    vessel_operators = [o for o in all_operators if o.get("type") == "vessel_operator"]
-    vessel_owners = [o for o in all_operators if o.get("type") == "vessel_owner"]
+    # operator.type is camelCase in the DB ('vesselOwner' / 'vesselOperator');
+    # snake_case here matched nothing and silently emptied both columns.
+    vessel_operators = [o for o in all_operators if o.get("type") == "vesselOperator"]
+    vessel_owners = [o for o in all_operators if o.get("type") == "vesselOwner"]
 
     # Build Owner display string and collect parent rows.
     # Owners use "Name + LegalType" (e.g. "INPEX Masela Ltd"); operators use
@@ -961,19 +1050,19 @@ def _build_row(plant: dict, unit: dict, lng_proj: dict | None, ctx: dict) -> dic
     operator_str = _join_entities(op_entries, share_fmt=_fmt_share_owner)
     operator_ref = _resolve_refs(op_ds_ids, ds)
 
-    # Vessel operator / vessel owner.
-    v_op_entries = [(o["company_name"], o["share"]) for o in vessel_operators]
+    # Vessel operator / vessel owner. Unlike Owner/Operator these render as bare
+    # company names - the website never appends the [NN%] share to them, even
+    # where operator.share is populated.
     v_op_ds: list[int] = []
     for o in vessel_operators:
         v_op_ds.extend(o.get("op_ds") or [])
-    vessel_op_str = _join_entities(v_op_entries, share_fmt=_fmt_share_owner)
+    vessel_op_str = "; ".join(o["company_name"] for o in vessel_operators if o["company_name"])
     vessel_op_ref = _resolve_refs(v_op_ds, ds)
 
-    v_own_entries = [(o["company_name"], o["share"]) for o in vessel_owners]
     v_own_ds: list[int] = []
     for o in vessel_owners:
         v_own_ds.extend(o.get("op_ds") or [])
-    vessel_own_str = _join_entities(v_own_entries, share_fmt=_fmt_share_owner)
+    vessel_own_str = "; ".join(o["company_name"] for o in vessel_owners if o["company_name"])
     vessel_own_ref = _resolve_refs(v_own_ds, ds)
 
     # Languages.
@@ -1013,6 +1102,29 @@ def _build_row(plant: dict, unit: dict, lng_proj: dict | None, ctx: dict) -> dic
 
     # lng_project fields, with safe fallbacks.
     lp = lng_proj or {}
+
+    # Cost lives on the unit, but some terminals record it only at project level.
+    # The website falls back to lng_project.cost when the unit carries none - but
+    # ONLY on single-unit terminals. On a multi-unit terminal the project cost is
+    # a whole-terminal figure, so pushing it onto each unit row would multiply it.
+    single_unit = ctx["units_per_plant"].get(plant_id, 0) == 1
+    if unit.get("cost") is not None or not single_unit:
+        cost_val, cost_unit = unit.get("cost"), unit.get("cost_unit")
+        cost_year, cost_raw = unit.get("cost_year"), unit.get("unit_cost_raw")
+    else:
+        cost_val, cost_unit = lp.get("proj_cost"), lp.get("proj_cost_unit")
+        cost_year, cost_raw = lp.get("proj_cost_year"), plant.get("plant_cost_raw")
+    cost_usd = _cost_in_usd(cost_val, cost_unit)
+
+    # The citation follows the cost's own level, independently of the single-unit
+    # gate above: a unit that carries a cost cites lng_unit.costDatasource, and
+    # everything else cites lng_project.costDatasource - which the website prints
+    # on every unit row of a multi-unit terminal even where it blanks the cost.
+    # This matches ~89% of rows. The rest are website-side: 129 rows whose unit
+    # cost + source are both populated print no reference at all, and nothing in
+    # the read-only replica distinguishes them from the 333 identical rows that
+    # do print one.
+    cost_ds = unit.get("cost_ds") if unit.get("cost") is not None else lp.get("proj_cost_ds")
 
     # Location-block fields. Each can live on either the unit (preferred for
     # multi-unit plants) or the plant. We always pull from the cached *JSON
@@ -1110,18 +1222,18 @@ def _build_row(plant: dict, unit: dict, lng_proj: dict | None, ctx: dict) -> dic
         "CaptiveGasPower [ref]": refs(lp.get("captive_gas_power_ds")),
         "Pipelines": _comma_join_strs(lp.get("pipelines") or []),
         "Pipelines [ref]": refs(lp.get("pipelines_ds")),
-        "Cost": _fmt_fixed2(unit.get("cost")),
-        "CostUnits": unit.get("cost_unit") or "",
-        "CostYear": str(unit.get("cost_year") or "") if unit.get("cost_year") else "",
-        # When the unit's cost is already in USD we can populate CostUSD directly.
-        # FX conversion to EUR (CostEuro) needs a historical USD-EUR rate for
-        # CostYear; not wired yet — left blank.
-        "CostUSD": _fmt_min1dp(unit.get("cost")) if (unit.get("cost_unit") or "").upper() == "USD" else "",
-        "CostEuro": "",
+        # Verbatim from the JSON snapshot: the website prints whatever string the
+        # editor stored, so '1500000000', '1500000000.00' and '2.67E+13' all
+        # survive as typed. Reformatting to 2dp here would differ on 27 rows.
+        "Cost": (cost_raw or "") if cost_val is not None else "",
+        "CostUnits": cost_unit or "",
+        "CostYear": str(cost_year) if cost_year else "",
+        "CostUSD": _fmt_min1dp(cost_usd),
+        "CostEuro": _fmt_min1dp(_round2(_cost_in_eur(cost_val, cost_unit))),
         # Cost [ref] only shows when there's an actual cost. Some units carry a
         # leftover costDatasource even when the cost itself is blank — the
         # website hides the reference in that case.
-        "Cost [ref]": refs(unit.get("cost_ds")) if unit.get("cost") is not None else "",
+        "Cost [ref]": refs(cost_ds),
         "TotKnownTerminalCostsUSD": _fmt_min1dp(totals.get("total_cost_usd")),
         "TotTerminalCost [ref]": "",
         "FIDStatus": sd["FIDStatus"],
@@ -1158,7 +1270,9 @@ def _build_row(plant: dict, unit: dict, lng_proj: dict | None, ctx: dict) -> dic
     return row
 
 
-def _compute_plant_totals(units: list[dict]) -> dict[int, dict]:
+def _compute_plant_totals(units: list[dict],
+                          lng_projects: dict[int, dict] | None = None,
+                          units_per_plant: dict[int, int] | None = None) -> dict[int, dict]:
     """Aggregate per-plant totals: capacity by facility type + total USD cost."""
     cap_totals: dict[int, dict] = defaultdict(lambda: {
         "import_mtpa": Decimal("0"), "export_mtpa": Decimal("0"),
@@ -1173,9 +1287,20 @@ def _compute_plant_totals(units: list[dict]) -> dict[int, dict]:
                 cap_totals[u["plant_id"]]["import_mtpa"] += mtpa
             elif ft == "export":
                 cap_totals[u["plant_id"]]["export_mtpa"] += mtpa
-        if u.get("cost") is not None and (u.get("cost_unit") or "").upper() == "USD":
-            cost_totals[u["plant_id"]] += Decimal(u["cost"])
+        # Every currency is converted, not just USD-denominated rows.
+        c_usd = _cost_in_usd(u.get("cost"), u.get("cost_unit"))
+        if c_usd is not None:
+            cost_totals[u["plant_id"]] += c_usd
             cost_seen[u["plant_id"]] = True
+    # A project-level cost is a whole-terminal figure and OVERRIDES the sum of
+    # the unit costs wherever it exists - it is not merely a fallback. Papua LNG
+    # carries a 4.5bn AUD unit cost yet totals 18bn USD, the lng_project value.
+    for pid, proj in (lng_projects or {}).items():
+        p_usd = _cost_in_usd(proj.get("proj_cost"), proj.get("proj_cost_unit"))
+        if p_usd is not None:
+            cost_totals[pid] = p_usd
+            cost_seen[pid] = True
+
     out: dict[int, dict] = {}
     plant_ids = set(cap_totals.keys()) | set(cost_totals.keys())
     for pid in plant_ids:
@@ -2276,6 +2401,7 @@ def export_all_fields(engine: Engine, out_path: str, limit: int | None = None) -
         _absorb(u.get("unit_capacity_ds"))
         _absorb(u.get("unit_location_ds"))
     for lp in lng_projects.values():
+        _absorb(lp.get("proj_cost_ds"))
         _absorb(lp.get("lng_source_ds"))
         _absorb(lp.get("pps_ds"))
         _absorb(lp.get("pipelines_ds"))
@@ -2297,7 +2423,10 @@ def export_all_fields(engine: Engine, out_path: str, limit: int | None = None) -
     data_sources = _fetch_data_sources(engine, ds_ids)
 
     # Plant-level capacity totals.
-    totals_by_plant = _compute_plant_totals(units)
+    units_per_plant: dict[int, int] = defaultdict(int)
+    for u in units:
+        units_per_plant[u["plant_id"]] += 1
+    totals_by_plant = _compute_plant_totals(units, lng_projects, units_per_plant)
 
     ctx = {
         "owners_by_plant": owners_by_plant,
@@ -2310,6 +2439,7 @@ def export_all_fields(engine: Engine, out_path: str, limit: int | None = None) -
         "timelines": timelines,
         "data_sources": data_sources,
         "totals_by_plant": totals_by_plant,
+        "units_per_plant": units_per_plant,
     }
 
     # Build one row per unit. Plants with no units would be skipped.
@@ -2329,4 +2459,10 @@ def export_all_fields(engine: Engine, out_path: str, limit: int | None = None) -
         writer = csv.DictWriter(f, fieldnames=ALL_FIELDS_COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
+    if _unmapped_currencies:
+        print("WARNING: no FX rate for currency code(s) "
+              + ", ".join(sorted(_unmapped_currencies))
+              + " - their CostUSD/CostEuro are blank. Add them to "
+              "CURRENCY_TO_USD / CURRENCY_TO_EUR in gem_all_fields.py.",
+              file=sys.stderr)
     return len(rows)
