@@ -12,7 +12,15 @@ Postgres pulls:
   `lng/gem_export.colmap.json`.
 - "pull GOGPT" → `python gogpt/pull.py` → `gogpt/gem_export_gogpt.csv` +
   colmap. The export contains every combustion unit (oil+gas+coal+bio), same
-  as the website's GOGPT export.
+  as the website's GOGPT export. Since the 2026-09-01 status migration the
+  source of truth for Status / Start year / Retired year / Planned retire /
+  Cancellation year and their data sources is `milestone_timeline` +
+  `scheduled_events_timeline` (per unit); the legacy `powerplant_unit`
+  columns (`status_id`, `startYear*`, `endYear*`, `plannedRetired*`,
+  `cancellationYear*`) are no longer maintained and must not be read.
+  Ownership columns follow Django's "enhanced implied share" rules. The
+  derivation is documented in `docs/ALL_FIELDS_STATUS.md` ("GOGPT: status
+  timelines and ownership").
 - "pull GOGET" → `python goget/pull.py` → `goget/gem_export_goget_tables/`
   (one CSV per table + manifest; no flat all-fields exporter exists for GOGET;
   `plant_history` excluded unless `--include-history`). Soft-deleted records

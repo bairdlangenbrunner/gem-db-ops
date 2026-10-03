@@ -167,8 +167,8 @@ LNG_EXPECTED_COLUMNS: dict[str, str] = {
 }
 
 # Oil & gas power plants (GOGPT) — gem_all_fields.export_gogpt_all_fields,
-# 86 columns. NB the export covers EVERY combustion unit (oil+gas+coal+bio);
-# see gogpt/pull.py.
+# 91 columns (matches the website's GOGPT export header as of 2026-09-15). NB
+# the export covers EVERY combustion unit (oil+gas+coal+bio); see gogpt/pull.py.
 GOGPT_EXPECTED_COLUMNS: dict[str, str] = {
     "last_updated": "Last Updated",
     "researcher": "Researcher",
@@ -188,8 +188,9 @@ GOGPT_EXPECTED_COLUMNS: dict[str, str] = {
     "status": "Status",
     "status_detail": "Status Detail",
     "status_ref": "Status Data Source",
-    "conflict_disrupted": "Disrupted due to conflict",
-    "conflict_disrupted_ref": "Disrupted due to conflict Data Source",
+    "conflict_disrupted": "Disrupted by conflict",
+    "conflict_disrupted_ref": "Disrupted by conflict Data Source",
+    "irp": "IRP",
     "latest_activity": "Latest Activity",
     "latest_activity_ref": "Latest Activity Data Source",
     "cancellation_year": "Cancellation year",
@@ -228,10 +229,12 @@ GOGPT_EXPECTED_COLUMNS: dict[str, str] = {
     "operator_ref": "Operators Data Source",
     "operator_entity_id": "Operator GEM Entity ID",
     "owner": "Owner(s)",
+    "owner_share_imputed": "Owner Share Imputed",
     "owner_entity_id": "Owner(s) GEM Entity ID",
     "owner_ref": "Owners Data Source",
     "parent": "Parent(s)",
     "parent_entity_id": "Parent GEM Entity ID",
+    "parent_share_imputed": "Parent Share Imputed",
     "latitude": "Latitude",
     "longitude": "Longitude",
     "location_accuracy": "Location accuracy",
@@ -249,6 +252,8 @@ GOGPT_EXPECTED_COLUMNS: dict[str, str] = {
     "captive_industry_type": "Captive industry type",
     "captive_non_industry_use": "Captive non-industry use",
     "captive_ref": "Captive Data Source",
+    "backup_power": "Backup Power",
+    "backup_power_ref": "Backup Power Data Source",
     "gem_location_id": "GEM location ID",
     "gem_unit_id": "GEM unit ID",
     "wepp_location_id": "WEPP location ID",

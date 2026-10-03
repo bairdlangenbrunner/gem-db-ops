@@ -12,7 +12,7 @@ Two backends, five trackers:
 | Folder | Tracker | Backend | Pull command | Output |
 |---|---|---|---|---|
 | `lng/` | LNG terminals (GGIT-LNG) | Postgres | `python lng/pull.py` | flat 115-col all-fields CSV + colmap |
-| `gogpt/` | Oil & gas power plants (GOGPT) | Postgres | `python gogpt/pull.py` | flat 86-col all-fields CSV + colmap |
+| `gogpt/` | Oil & gas power plants (GOGPT) | Postgres | `python gogpt/pull.py` | flat 91-col all-fields CSV + colmap |
 | `goget/` | Oil & gas extraction (GOGET) | Postgres | `python goget/pull.py` | one CSV per table + manifest |
 | `ggit/` | Gas pipelines (GGIT) | Google Sheet | `python ggit/pull.py` | pipelines tab as CSV + colmap |
 | `goit/` | Oil/NGL pipelines (GOIT) | Google Sheet | `python goit/pull.py` | pipelines tab as CSV + colmap |
@@ -74,7 +74,7 @@ also no CI credential: the `gem-analysis` service account was deleted
   calling `create_engine`/`psycopg2.connect` — it is what sets
   `default_transaction_read_only=on` and a statement timeout on every session.
 - `gem_all_fields.py` — library reproducing the website's flat "Export all
-  fields" CSVs from Postgres (LNG: 115 cols; GOGPT: 86 cols). **Running it
+  fields" CSVs from Postgres (LNG: 115 cols; GOGPT: 91 cols). **Running it
   directly is a no-op** — it's imported by `gem_query.py --all-fields` and the
   per-tracker `pull.py` scripts. Validation notes: `docs/ALL_FIELDS_STATUS.md`.
   No GOGET exporter yet — port one here following the lng/gogpt pattern if

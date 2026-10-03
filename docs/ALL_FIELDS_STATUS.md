@@ -19,7 +19,7 @@ Last touched: 2026-05-22.
 
 - `python gem_query.py --all-fields lng   -o terminals.csv` — 115-col LNG CSV
   (one row per `lng_unit`).
-- `python gem_query.py --all-fields gogpt -o gogpt.csv` — 86-col GOGPT CSV
+- `python gem_query.py --all-fields gogpt -o gogpt.csv` — 91-col GOGPT CSV
   (one row per combustion-projectType `powerplant_unit`).
 - CLI flag accepts `lng` or `gogpt`; passing neither is an error.
 
@@ -29,6 +29,7 @@ Validated against fresh website exports:
 |---|---|---:|---:|---:|
 | LNG   | `all-fields-2026-05-22T181922.csv`    | 1,261 | 96.46% | 8.01% |
 | GOGPT | `GOGPT-all-2026-05-22T183522.csv`     | 34,515 | 99.29% | 65.21% |
+| GOGPT | `GOGPT-all-2026-09-15T174727.csv` (timeline rewrite, 2026-10-02) | 34,938 | see GOGPT section | — |
 
 Implementation in `gem_all_fields.py`; `gem_query.py` adds the `--all-fields`
 CLI choice and dispatches to `export_all_fields` (LNG) or
@@ -130,6 +131,92 @@ The website exports 115 columns. Coverage:
 **Not implemented**:
 - `VesselParent` — would require running the company_owner traversal on vessel-owner companies
 - `TotTerminalCost [ref]` — plant-level cost reference aggregate
+
+## GOGPT: status timelines and ownership (rewritten 2026-10-02)
+
+Ground truth for this section: the website's `GOGPT-all-2026-09-15T174727.csv`
+(34,938 rows) and the Django source in `GlobalEnergyMonitor/GEM-project-db`
+(read-only reference; `projects/timeline_status.py`, `projects/ownership.py`,
+`projects/export.py`). The website header is now 91 columns and our
+`GOGPT_COLUMNS` / `gem_colmap.GOGPT_EXPECTED_COLUMNS` match it exactly.
+
+### Why the rewrite
+
+On 2026-09-01 GEM migrated combustion status data into two per-unit timeline
+tables, and the Django export reads only those. The legacy `powerplant_unit`
+columns (`status_id`, `statusDatasource`, `startYear*`, `endYear*`,
+`plannedRetired*`, `cancellationYear*`) stopped being maintained, so the old
+exporter silently went stale (symptom that started this: G100001090726,
+Constellation (Project 1) in Maryland, showed no Start year where the website
+showed 2029). `_fetch_gogpt_units` deliberately no longer selects those columns.
+
+### The two tables
+
+- `milestone_timeline` — things that happened. Columns used: `unit_id`,
+  `"order"`, `status`, `substatus`, `"eventYear"`, `"eventMonthOrHalfYear"`,
+  `"statusDatasource"` (jsonb list of `data_source.id`), `"makeCurrent"`.
+- `scheduled_events_timeline` — things that are planned. Same columns plus
+  `"dataSourceYear"`, `"dataSourceMonthOrHalfYear"`, `withdrawn`.
+
+Rows are ordered by `"order"` then `id`. 191 GOGPT units have no milestone rows
+at all; the website then prints a blank Status, and so do we.
+
+### Derivation (`_derive_gogpt_status_columns`, ported from Django)
+
+| Column | Rule |
+|---|---|
+| Status | the milestone row with `makeCurrent`, else the last row by order. Status name is `status`, except `(shelved, inferred)` → `shelved - inferred 2 y` and `(cancelled, inferred)` → `cancelled - inferred 4 y`. |
+| Status Data Source | that row's `statusDatasource`, in stored order. |
+| Start year | first *dated* (`eventYear` set) milestone with status `operating`; if none, the scheduled "plan row": non-withdrawn, dated, status `operating`, highest `dataSourceYear`, ties broken by highest order. |
+| Retired year / Planned retire | the last dated `retired` milestone fills Retired year. If there is none, the scheduled plan row for `retired` fills Planned retire instead. |
+| Retired Year Data Source | **always** the chosen row's data source, even when the year went to Planned retire. Django's planned/actual split (`gas_unit_value`) only covers the year columns and `Planned Retire Data Source`; its `'Retired year Data Source'` branch is spelled with a lowercase y and never matches the real header, so the column just gets the row's source. Reproducing this quirk took the column from 1,409 misses to 30. |
+| Cancellation year | latest dated `cancelled` milestone. |
+
+### Ownership ("enhanced implied share", `projects/ownership.py`)
+
+- Owner share: `plant_owner.share` if set. Otherwise, if the owner has a
+  company and there are blank-share owners: remainder = 100 − sum(set shares);
+  0 if that is ≤ 0, else remainder / number of blank owners, quantized to 0.1.
+- Owner display is `name [int(share)%]` — truncation, not rounding.
+- `Owner Share Imputed` = `Y` when any owner's share was computed this way.
+- Parents come from `company.gemParentsImputedJSON` (fallback
+  `gemParentsJSON`), a list of `{id, share, imputed}`. Each parent's total is
+  Σ owner_share × parent_share / 100 across owners; rendered sorted by
+  (−value, name lowercased) as `Name LegalType [x.x%]`, one decimal, always
+  bracketed, zero-percent entries included. `Parent Share Imputed` = `Y` if any
+  contributing entry is imputed or the owner share was.
+- The website builds the owner list as a Python set, so owner order is
+  arbitrary there; our output is ordered by share desc then `plant_owner.id`.
+  Most remaining `Owner(s)` misses (923) are this ordering.
+
+### Other columns that changed
+
+- `Disrupted due to conflict` → `Disrupted by conflict` (website rename).
+- New: `IRP` (`powerplant_unit.irp` → yes/no), `Owner Share Imputed`,
+  `Parent Share Imputed`, `Backup Power`, `Backup Power Data Source`.
+- Captive block: unit values if `powerplant_unit.captive`, else plant values if
+  `plant.captive`, else every captive column blank and `Backup Power` = `no`.
+
+### Accuracy after the rewrite (vs the 2026-09-15 website file, 34,938 shared units)
+
+Timeline columns: Status 105 misses, Start year 32, Cancellation year 33,
+Retired Year Data Source 30, Status Data Source 452. Every sampled miss is a
+timeline or data-source row modified after 2026-09-15 (drift, not a rule
+gap). Parent(s) 756 / Parent GEM Entity ID 664 / Parent Share Imputed 595
+trace to a rebake of `gemParentsImputedJSON` on 2026-09-17, i.e. also drift.
+
+Pre-existing gaps, identical in the old and new exporter, not touched here:
+
+| Column | Misses | What differs |
+|---|---:|---|
+| Other Name(s), WEPP unit ID, Other IDs (location), local names, WEPP location ID, Other IDs (unit) | 1,051–2,904 | multi-value ordering; Other IDs (location) also duplicates an EIP entry |
+| Notes | 834 | whitespace / line-join differences |
+| Conversion to (fuel) / (GEM unit ID) | 582 | we fill from back-references, website leaves blank |
+| State/Province | 572 | same priority-chain problem as LNG |
+| Linked Projects | 329 | website shows pipeline links we don't resolve |
+| CHP / CHP Data Source | 250 / 211 | website prints `no` / `not found`, we print blank |
+
+Reproduce with the diff script in "Useful one-liners".
 
 ## Key things learned while building this
 
@@ -265,6 +352,10 @@ for c, x in sorted(counts.items(), key=lambda kv: -kv[1])[:20]:
 EOF
 ```
 
+For GOGPT, key on `GEM unit ID` instead (one row per unit) — the same loop
+works with `python gogpt/pull.py` output and a website `GOGPT-all-*.csv`;
+remember `csv.field_size_limit(10**9)` because Notes cells exceed the default.
+
 Inspect a specific terminal's diffs:
 
 ```bash
@@ -292,8 +383,12 @@ Quick DB lookups (using gem_query.py's --sql mode):
 # Get plantJSON for one terminal
 python gem_query.py --sql 'SELECT "plantJSON" FROM plant WHERE id = 100000130274' -o /tmp/x.csv
 
-# Status timeline for a unit
+# Status timeline for an LNG unit
 python gem_query.py --sql 'SELECT * FROM status_timeline WHERE unit_id = 100002027401 ORDER BY "order"' -o /tmp/x.csv
+
+# Status timelines for a combustion (GOGPT) unit
+python gem_query.py --sql 'SELECT * FROM milestone_timeline WHERE unit_id = 100001090726 ORDER BY "order", id' -o /tmp/m.csv
+python gem_query.py --sql 'SELECT * FROM scheduled_events_timeline WHERE unit_id = 100001090726 ORDER BY "order", id' -o /tmp/s.csv
 
 # Owner + parent info for a plant
 python gem_query.py --sql 'SELECT po.share, c.name, c."gemParents", c."gemParentsIds" FROM plant_owner po JOIN company c ON c.id=po.company_id WHERE po.plant_id = 100000130274' -o /tmp/x.csv

@@ -15,10 +15,11 @@ replacement for it (column order, prefix conventions, aggregation format).
 from __future__ import annotations
 
 import csv
+import json
 import re
 import sys
 from collections import defaultdict
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -260,66 +261,8 @@ def _fmt_share_owner(share) -> str:
     return f"{d.normalize()}%"
 
 
-def _fmt_share_owner_int(share) -> str:
-    """GOGPT/gas_all owner shares round to whole percent (33.33% -> 33%)."""
-    if share is None:
-        return ""
-    rounded = Decimal(share).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    return f"{int(rounded)}%"
 
 
-# Parses one `<name> [<share>%]` segment of a gemParents string.
-_GEMPARENT_RE = re.compile(r"^(.*?)\s*\[\s*([0-9.]+)\s*%\s*\]\s*$")
-
-
-def _parse_gemparents(text_val: str | None) -> list[tuple[str, Decimal | None]]:
-    """Split 'Name1 [50%]; Name2 [50%]' -> [(Name1, Decimal(50)), (Name2, Decimal(50))].
-
-    Entries without a `[X%]` bracket parse to (name, None).
-    """
-    if not text_val:
-        return []
-    out: list[tuple[str, Decimal | None]] = []
-    for piece in text_val.split(";"):
-        piece = piece.strip()
-        if not piece:
-            continue
-        m = _GEMPARENT_RE.match(piece)
-        if m:
-            name = m.group(1).strip()
-            try:
-                share = Decimal(m.group(2))
-            except Exception:
-                share = None
-            out.append((name, share))
-        else:
-            out.append((piece, None))
-    return out
-
-
-def _format_gogpt_parent_pieces(
-    parent_entries: list[tuple[str, Decimal | None]],
-    owner_share: Decimal | None,
-) -> list[str]:
-    """Render parent (name, parent-share-of-owner) pairs with effective shares.
-
-    Rule reverse-engineered from the reference CSV:
-      - If the gemParents entry has NO `[X%]` bracket, no share is displayed
-        regardless of the owner's share.
-      - If the owner's share-of-unit is NULL, no share is displayed even if
-        the gemParents entry has a bracket.
-      - Otherwise: displayed share = owner_share × gemparent_share / 100,
-        formatted with one decimal (50.0%, 33.3%, 16.7%).
-    """
-    out: list[str] = []
-    for name, gp_share in parent_entries:
-        if owner_share is None or gp_share is None:
-            out.append(name)
-        else:
-            effective = (Decimal(owner_share) * Decimal(gp_share)) / Decimal(100)
-            formatted = effective.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-            out.append(f"{name} [{formatted}%]")
-    return out
 
 
 def _fmt_share_parent(share) -> str:
@@ -611,7 +554,9 @@ def _fetch_owners(engine: Engine, plant_ids: list[int], unit_ids: list[int]):
                let.type AS legal_type,
                hq."gemName" AS hq_country,
                c."gemParents" AS gem_parents,
-               c."gemParentsIds" AS gem_parents_ids
+               c."gemParentsIds" AS gem_parents_ids,
+               c."gemParentsJSON" AS gem_parents_json,
+               c."gemParentsImputedJSON" AS gem_parents_imputed_json
         FROM plant_owner po
         JOIN company c ON c.id = po.company_id
         LEFT JOIN legal_entity_type let ON let.id = c."legalEntityType_id"
@@ -1338,7 +1283,8 @@ GOGPT_COLUMNS = [
     "Number Of Engines", "Capacity Per Engine",
     "Capacity (MW)", "Capacity Data Source",
     "Status", "Status Detail", "Status Data Source",
-    "Disrupted due to conflict", "Disrupted due to conflict Data Source",
+    "Disrupted by conflict", "Disrupted by conflict Data Source",
+    "IRP",
     "Latest Activity", "Latest Activity Data Source",
     "Cancellation year", "Cancellation year Data Source",
     "Turbine/Engine Technology", "Turbine/Engine Technology Data Source",
@@ -1359,8 +1305,8 @@ GOGPT_COLUMNS = [
     "Retired year", "Retired Year Data Source",
     "Planned retire", "Planned Retire Data Source",
     "Operator(s)", "Operators Data Source", "Operator GEM Entity ID",
-    "Owner(s)", "Owner(s) GEM Entity ID", "Owners Data Source",
-    "Parent(s)", "Parent GEM Entity ID",
+    "Owner(s)", "Owner Share Imputed", "Owner(s) GEM Entity ID", "Owners Data Source",
+    "Parent(s)", "Parent GEM Entity ID", "Parent Share Imputed",
     "Latitude", "Longitude", "Location accuracy", "Location Data Source",
     "City",
     "Local area (taluk, county)",
@@ -1370,6 +1316,7 @@ GOGPT_COLUMNS = [
     "Notes",
     "Captive industry use", "Captive industry type",
     "Captive non-industry use", "Captive Data Source",
+    "Backup Power", "Backup Power Data Source",
     "GEM location ID", "GEM unit ID",
     "WEPP location ID", "WEPP unit ID",
     "Employment Notes", "Employment Notes Data Source",
@@ -1405,14 +1352,6 @@ def _fmt_yes_no_option(option: str | None) -> str:
     'no', 'not found', 'using hydrogen', ...). Pass through, blank for NULL."""
     return option or ""
 
-
-def _fmt_bool_yes_blank(b) -> str:
-    """The website renders many `*` boolean columns as 'yes' / blank for
-    false-or-null (NOT 'yes' / 'no'). Mirrors the LNG `_yn` convention but
-    with a lowercase 'yes' as required by the gas_all export."""
-    if b is True:
-        return "yes"
-    return ""
 
 
 def _join_external_ids(rows: list[dict], system_lookup: dict[int, str],
@@ -1477,6 +1416,8 @@ def _fetch_gogpt_plants(engine: Engine, limit: int | None) -> list[dict]:
             p."captiveIndustryType" AS plant_captive_industry_type_jsonb,
             ciu.option AS plant_captive_industry_use_option,
             cniu.option AS plant_captive_non_industry_use_option,
+            p."backupPower" AS plant_backup_power,
+            p."backupPowerDatasource" AS plant_backup_power_ds,
             p.country_id AS country_id,
             c."gemName" AS country_name,
             c.region AS region,
@@ -1505,7 +1446,14 @@ def _fetch_gogpt_plants(engine: Engine, limit: int | None) -> list[dict]:
 
 
 def _fetch_gogpt_units(engine: Engine, plant_ids: list[int]) -> list[dict]:
-    """Powerplant units with trackerSearch=GOGPT, joined to status/ccs/chp/h2 lookups."""
+    """Combustion units of the given plants, joined to ccs/chp/h2/captive lookups.
+
+    Deliberately does NOT select `status_id`, `statusDatasource`,
+    `startYear*`, `endYear*`, `plannedRetired*` or `cancellationYear*`:
+    since the 2026-09-01 status migration those columns are unmaintained
+    leftovers. Status and every year column come from the milestone /
+    scheduled-events timelines (`_fetch_combustion_timelines`).
+    """
     if not plant_ids:
         return []
     sql = """
@@ -1519,15 +1467,12 @@ def _fetch_gogpt_units(engine: Engine, plant_ids: list[int]) -> list[dict]:
             pu."capacityPerEngine" AS capacity_per_engine,
             pu."numberOfEngines" AS number_of_engines,
             pu."statusDetail" AS status_detail,
-            pu."statusDatasource" AS status_ds,
             pu."disruptedDueToConflict" AS disrupted,
             pu."disruptedDueToConflictDatasource" AS disrupted_ds,
             pu."latestActivityYear" AS latest_activity_year,
             pu."latestActivityMonth" AS latest_activity_month,
             pu."latestActivityDay" AS latest_activity_day,
             pu."latestActivityDatasource" AS latest_activity_ds,
-            pu."cancellationYear" AS cancellation_year,
-            pu."cancellationYearDatasource" AS cancellation_year_ds,
             pu."fuelDatasource" AS fuel_ds,
             pu.turbine AS turbine_text,
             pu."turbineDatasource" AS turbine_ds,
@@ -1550,16 +1495,14 @@ def _fetch_gogpt_units(engine: Engine, plant_ids: list[int]) -> list[dict]:
             pu."fuelConversion" AS fuel_conversion,
             pu."fuelConversionUnknown" AS fuel_conversion_unknown,
             pu."fuelConversionInitialUnit_id" AS fuel_conversion_initial_unit_id,
-            pu."startYearLow" AS start_year_low,
-            pu."startYearHigh" AS start_year_high,
-            pu."startYearPlanned" AS start_year_planned,
-            pu."startYearDatasource" AS start_year_ds,
-            pu."endYearLow" AS end_year_low,
-            pu."endYearHigh" AS end_year_high,
-            pu."endYearPlanned" AS end_year_planned,
-            pu."endYearDatasource" AS end_year_ds,
-            pu."plannedRetiredYear" AS planned_retired_year,
-            pu."plannedRetiredDatasource" AS planned_retired_ds,
+            pu.irp AS irp,
+            pu.captive AS unit_captive,
+            pu."captiveDatasource" AS unit_captive_ds,
+            pu."captiveIndustryType" AS unit_captive_industry_type_jsonb,
+            uciu.option AS unit_captive_industry_use_option,
+            ucniu.option AS unit_captive_non_industry_use_option,
+            pu."backupPower" AS unit_backup_power,
+            pu."backupPowerDatasource" AS unit_backup_power_ds,
             pu."localArea" AS unit_local_area,
             pu."majorArea" AS unit_major_area,
             pu.latitude AS unit_lat,
@@ -1571,15 +1514,15 @@ def _fetch_gogpt_units(engine: Engine, plant_ids: list[int]) -> list[dict]:
             pu."unitJSON"->>'city' AS unit_city_json,
             pu."unitJSON"->>'subnational' AS unit_subnational_json,
             pu."unitJSON"->>'locationAccuracy' AS unit_accuracy_json,
-            st.name AS status_name,
             ccs.option AS ccs_option,
             chp.option AS chp_option,
             hc.option AS hydrogen_capable_option
         FROM powerplant_unit pu
-        LEFT JOIN status st ON st.id = pu.status_id
         LEFT JOIN ccs ccs ON ccs.id = pu."ccsAttachment_id"
         LEFT JOIN chp chp ON chp.id = pu.chp_id
         LEFT JOIN hydrogen_capable hc ON hc.id = pu."hydrogenCapable_id"
+        LEFT JOIN captive_industry_use uciu ON uciu.id = pu."captiveIndustryUse_id"
+        LEFT JOIN captive_non_industry_use ucniu ON ucniu.id = pu."captiveNonIndustryUse_id"
         WHERE pu.plant_id = ANY(:plant_ids)
           AND pu.deleted = false
         ORDER BY pu.plant_id, pu.id
@@ -1827,28 +1770,237 @@ def _format_captive_industry_type(jsonb_val, type_names: dict[int, str]) -> str:
     return ", ".join(names)
 
 
-def _format_start_or_end_year(low, high) -> str:
-    """Year column: 'YYYY' if same, 'YYYY-YYYY' if a range, blank otherwise."""
-    if low is None and high is None:
+
+# ---------------------------------------------------------------------------
+# Combustion status timelines (milestone_timeline + scheduled_events_timeline)
+# ---------------------------------------------------------------------------
+# Since the 2026-09-01 status migration a combustion unit's status, start
+# year, retired year and cancellation year live on two timelines, and the
+# legacy `powerplant_unit` columns (status_id, startYearLow, endYearLow, ...)
+# are no longer maintained. The rules below are a port of the website's
+# `projects/timeline_status.py` + the export shim in `project_display.py`
+# (GEM-project-db); keep them in step with that code, not with the legacy
+# columns.
+
+# (status, substatus) -> Status codelist name the website reports.
+_TL_STATUS_NAME = {
+    ("operating", None): "operating",
+    ("announced", None): "announced",
+    ("pre-construction", None): "pre-construction",
+    ("pre-construction", "pre-permit"): "pre-construction",
+    ("pre-construction", "permitted"): "pre-construction",
+    ("construction", None): "construction",
+    ("shelved", None): "shelved",
+    ("shelved", "inferred"): "shelved - inferred 2 y",
+    ("cancelled", None): "cancelled",
+    ("cancelled", "inferred"): "cancelled - inferred 4 y",
+    ("mothballed", None): "mothballed",
+    ("retired", None): "retired",
+    ("retired", "converted"): "retired",
+}
+
+
+def _fetch_combustion_timelines(engine: Engine, unit_ids: list[int]):
+    """Return (milestones_by_unit, scheduled_by_unit), rows keyed by the
+    DB column names (same names the website's unitJSON uses)."""
+    if not unit_ids:
+        return {}, {}
+    ms_sql = """
+        SELECT unit_id, "order", status, substatus, "eventYear",
+               "eventMonthOrHalfYear", "statusDatasource", "makeCurrent"
+        FROM milestone_timeline
+        WHERE unit_id = ANY(:unit_ids)
+        ORDER BY unit_id, "order", id
+    """
+    sc_sql = """
+        SELECT unit_id, "order", status, substatus, "eventYear",
+               "eventMonthOrHalfYear", "statusDatasource",
+               "dataSourceYear", "dataSourceMonthOrHalfYear", withdrawn
+        FROM scheduled_events_timeline
+        WHERE unit_id = ANY(:unit_ids)
+        ORDER BY unit_id, "order", id
+    """
+    milestones: dict[int, list[dict]] = defaultdict(list)
+    scheduled: dict[int, list[dict]] = defaultdict(list)
+    with engine.connect() as conn:
+        for r in conn.execute(text(ms_sql), {"unit_ids": unit_ids}):
+            milestones[r._mapping["unit_id"]].append(_row_to_dict(r))
+        for r in conn.execute(text(sc_sql), {"unit_ids": unit_ids}):
+            scheduled[r._mapping["unit_id"]].append(_row_to_dict(r))
+    return dict(milestones), dict(scheduled)
+
+
+def _tl_ordered(rows: list[dict]) -> list[dict]:
+    """Rows with a status, in timeline order."""
+    real = [r for r in (rows or []) if r.get("status")]
+    return sorted(real, key=lambda r: int(r.get("order") or 0))
+
+
+def _tl_current_row(rows: list[dict]) -> dict | None:
+    """The row marked makeCurrent, else the last row."""
+    ordered = _tl_ordered(rows)
+    if not ordered:
+        return None
+    marked = [r for r in ordered if r.get("makeCurrent")]
+    return marked[0] if marked else ordered[-1]
+
+
+def _tl_current_status(rows: list[dict]) -> str:
+    row = _tl_current_row(rows)
+    if not row or not row.get("status"):
         return ""
-    if low is not None and high is not None and int(low) != int(high):
-        return f"{int(low)}-{int(high)}"
-    val = low if low is not None else high
-    return str(int(val))
+    return _TL_STATUS_NAME.get((row["status"], row.get("substatus") or None), row["status"])
 
 
-def _build_gogpt_owners_parents(plant: dict, unit: dict, ctx: dict):
-    """Return (owner_str, owner_id_str, owner_ref, parent_str, parent_id_str)."""
+def _tl_dated_row(rows: list[dict], status: str, latest: bool = False) -> dict | None:
+    """Earliest (or latest) row with this status and an eventYear."""
+    dated = [r for r in _tl_ordered(rows)
+             if r.get("status") == status and r.get("eventYear")]
+    if not dated:
+        return None
+    return dated[-1] if latest else dated[0]
+
+
+def _tl_final_retirement_row(rows: list[dict]) -> dict | None:
+    """The latest dated milestone, if it is a retirement; a retirement with a
+    later dated milestone (the unit came back) is not the retired year."""
+    dated = [r for r in _tl_ordered(rows) if r.get("eventYear")]
+    if not dated:
+        return None
+    last = max(dated, key=lambda r: (r["eventYear"], int(r.get("order") or 0)))
+    return last if last.get("status") == "retired" else None
+
+
+def _tl_plan_row(rows: list[dict], status: str) -> dict | None:
+    """The plan in force on the scheduled timeline: the newest REVISION
+    (max dataSourceYear, then order) among non-withdrawn dated rows."""
+    live = [r for r in _tl_ordered(rows)
+            if r.get("status") == status and r.get("eventYear") and not r.get("withdrawn")]
+    if not live:
+        return None
+    return max(live, key=lambda r: (r.get("dataSourceYear") or 0, int(r.get("order") or 0)))
+
+
+def _tl_ds(row: dict | None) -> list:
+    return (row or {}).get("statusDatasource") or []
+
+
+def _derive_gogpt_status_columns(milestones: list[dict], scheduled: list[dict]) -> dict:
+    """Port of the website export shim: Status + Start/Retired/Planned
+    retire/Cancellation years and their data sources from the timelines."""
+    out: dict = {}
+    current = _tl_current_row(milestones)
+    out["status"] = _tl_current_status(milestones)
+    out["status_ds"] = _tl_ds(current)
+
+    # Start: the first time it ran; else the plan in force to run.
+    row = _tl_dated_row(milestones, "operating")
+    if row is None:
+        row = _tl_plan_row(scheduled, "operating")
+    out["start_year"] = _fmt_year(row.get("eventYear")) if row else ""
+    out["start_ds"] = _tl_ds(row)
+
+    # Retirement: only a retirement the unit did not come back from counts;
+    # otherwise the live plan goes to "Planned retire".
+    row = _tl_final_retirement_row(milestones)
+    planned = row is None
+    if planned:
+        row = _tl_plan_row(scheduled, "retired")
+    year = _fmt_year(row.get("eventYear")) if row else ""
+    out["retired_year"] = "" if planned else year
+    out["planned_retire"] = year if planned else ""
+    # The website writes the chosen row's data source to BOTH "Retired Year
+    # Data Source" and (when planned) "Planned Retire Data Source": its
+    # planned/actual split (gas_unit_value) only applies to the year columns
+    # and to a 'Retired year Data Source' header that the export never uses.
+    out["retired_ds"] = _tl_ds(row)
+    out["planned_retire_ds"] = _tl_ds(row) if planned else []
+
+    row = _tl_dated_row(milestones, "cancelled", latest=True)
+    out["cancellation_year"] = _fmt_year(row.get("eventYear")) if row else ""
+    out["cancellation_ds"] = _tl_ds(row)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Combustion ownership: enhanced implied shares + precomputed GEM parents
+# ---------------------------------------------------------------------------
+# Port of GEM-project-db `projects/ownership.py`
+# (enhanced_implied_share_for_owner), `project_display.py`
+# (_accumulate_precomputed_parents + the owner loop) and
+# `company_views.get_parent_string`. Combustion is the only tracker on the
+# "enhanced" rule, which fills blank owner shares with an equal split of
+# whatever the explicit shares leave over.
+
+def _enhanced_implied_share(owner: dict, owners: list[dict]) -> Decimal | None:
+    if owner.get("share") is not None:
+        return Decimal(owner["share"])
+    if not owner.get("company_id"):
+        return None
+    with_company = [o for o in owners if o.get("company_id")]
+    blank = [o for o in with_company if o.get("share") is None]
+    if not blank:
+        return None
+    claimed = sum((Decimal(o["share"]) for o in with_company if o.get("share") is not None),
+                  Decimal(0))
+    remainder = Decimal(100) - claimed
+    if remainder <= 0:
+        return Decimal(0)
+    return (remainder / len(blank)).quantize(Decimal("0.1"))
+
+
+def _fetch_company_parent_names(engine: Engine, company_ids: list[int]) -> dict[int, str]:
+    """{company id: 'Name LegalType'} for the parent-column names."""
+    if not company_ids:
+        return {}
+    sql = """
+        SELECT c.id, c.name, let.type AS legal_type
+        FROM company c
+        LEFT JOIN legal_entity_type let ON let.id = c."legalEntityType_id"
+        WHERE c.id = ANY(:ids)
+    """
+    out: dict[int, str] = {}
+    with engine.connect() as conn:
+        for r in conn.execute(text(sql), {"ids": company_ids}):
+            out[int(r._mapping["id"])] = _company_display(r._mapping["name"], r._mapping["legal_type"])
+    return out
+
+
+def _owner_parent_rows(owner: dict) -> list[dict]:
+    """The owner company's precomputed ultimate parents: the imputed list,
+    falling back to the plain one when the imputed JSON is empty."""
+    rows = []
+    for key in ("gem_parents_imputed_json", "gem_parents_json"):
+        raw = owner.get(key)
+        if raw:
+            rows = json.loads(raw) if isinstance(raw, str) else raw
+            if rows:
+                break
+    return rows or []
+
+
+def _parent_string(totals: dict, names: bool) -> str:
+    items = sorted(totals.items(), key=lambda kv: (kv[1] * -1, kv[0][1].lower()))
+    pieces = []
+    for (pid, name), value in items:
+        shown = Decimal(value).quantize(Decimal("0.1"), rounding=ROUND_HALF_EVEN)
+        label = name if names else f"{ID_PREFIX_ENTITY}{pid}"
+        pieces.append(f"{label} [{shown}%]")
+    return "; ".join(pieces)
+
+
+def _build_gogpt_owners_parents(plant: dict, unit: dict, ctx: dict) -> dict:
+    """Owner(s) / Owner(s) GEM Entity ID / Owners Data Source / Parent(s) /
+    Parent GEM Entity ID plus the two Imputed flags, website rules."""
     ds = ctx["data_sources"]
+    parent_names = ctx["parent_names"]
     if plant.get("plant_level_owners"):
         owners = ctx["owners_by_plant"].get(plant["plant_id"], [])
     else:
         owners = ctx["owners_by_unit"].get(unit["unit_id"], [])
 
-    # Sort by share DESC NULLS LAST, then by plant_owner.id ASC. Fits the
-    # reference for tied numeric shares; all-NULL-share multi-owner rows
-    # follow a different (un-reverse-engineered) order — known issue from
-    # the LNG export too.
+    # The website renders owners from a set, so its order is arbitrary. Sort
+    # by share DESC NULLS LAST, then plant_owner.id for a stable output.
     owners = sorted(
         owners,
         key=lambda o: (
@@ -1858,52 +2010,47 @@ def _build_gogpt_owners_parents(plant: dict, unit: dict, ctx: dict):
         ),
     )
 
-    owner_entries = [
-        (_company_display(o["company_name"], o["legal_type"]), o["share"])
-        for o in owners
-    ]
-    owner_str = _join_entities(owner_entries, share_fmt=_fmt_share_owner_int)
-    owner_id_entries = [(o["company_id"], o["share"]) for o in owners]
-    owner_id_str = _join_ids(owner_id_entries, share_fmt=_fmt_share_owner_int)
+    owner_pieces: list[str] = []
+    owner_id_pieces: list[str] = []
     owner_ds_ids: list[int] = []
+    gem_totals: dict = {}
+    share_imputed = False
+    gem_imputed = False
     for o in owners:
         owner_ds_ids.extend(o.get("share_ds") or [])
-    owner_ref = _resolve_refs(owner_ds_ids, ds)
+        owner_share = _enhanced_implied_share(o, owners)
+        if o.get("company_id") and o.get("share") is None and owner_share is not None:
+            share_imputed = True
+        # Parents: the owner's baked ultimate-parent chain, rooted at 100,
+        # scaled by the owner's (possibly implied) share and summed by id.
+        share = owner_share if owner_share is not None else Decimal(0)
+        for parent in _owner_parent_rows(o):
+            pid = str(parent["id"])
+            if parent.get("imputed"):
+                gem_imputed = True
+            name = parent_names.get(int(pid)) or f"{ID_PREFIX_ENTITY}{pid}"
+            key = (pid, name)
+            gem_totals[key] = gem_totals.get(key, Decimal(0)) + share * Decimal(str(parent["share"])) / 100
+        name = _company_display(o["company_name"], o["legal_type"])
+        if name and o.get("company_id"):
+            if owner_share is not None:
+                # website: int(float(share)) -> truncation, 33.3 -> 33
+                pct = int(owner_share)
+                owner_pieces.append(f"{name} [{pct}%]")
+                owner_id_pieces.append(f"{ID_PREFIX_ENTITY}{o['company_id']} [{pct}%]")
+            else:
+                owner_pieces.append(name)
+                owner_id_pieces.append(f"{ID_PREFIX_ENTITY}{o['company_id']}")
 
-    # Parent column: parse gemParents and gemParentsIds, compute effective
-    # share-of-unit per parent (owner_share × parent_share_in_brackets / 100).
-    # When gemParents is empty/NULL, fall back to the owner itself with no
-    # share displayed — the website's behavior for ungrouped owners.
-    parent_pieces: list[str] = []
-    parent_id_pieces: list[str] = []
-    for o in owners:
-        gp = o.get("gem_parents")
-        gpi = o.get("gem_parents_ids")
-        owner_id = o["company_id"]
-        owner_share = o.get("share")
-        if not gp:
-            # No curated parent → the owner is its own parent. Setting
-            # gp_share=100 means the effective share displayed equals the
-            # owner's share-of-unit (e.g. owner@100% → '[100.0%]', NULL
-            # owner-share → blank).
-            name = _company_display(o["company_name"], o["legal_type"])
-            parent_entries = [(name, Decimal(100))]
-            parent_id_entries = [(f"{ID_PREFIX_ENTITY}{owner_id}", Decimal(100))]
-        else:
-            parent_entries = _parse_gemparents(gp)
-            parent_id_entries = _parse_gemparents(gpi)
-
-        parent_pieces.extend(
-            _format_gogpt_parent_pieces(parent_entries, owner_share)
-        )
-        parent_id_pieces.extend(
-            _format_gogpt_parent_pieces(parent_id_entries, owner_share)
-        )
-
-    return (
-        owner_str, owner_id_str, owner_ref,
-        "; ".join(parent_pieces), "; ".join(parent_id_pieces),
-    )
+    return {
+        "owners": "; ".join(owner_pieces),
+        "owner_ids": "; ".join(owner_id_pieces),
+        "owners_ds": _resolve_refs(owner_ds_ids, ds),
+        "owner_share_imputed": "Y" if share_imputed else "",
+        "parents": _parent_string(gem_totals, names=True),
+        "parent_ids": _parent_string(gem_totals, names=False),
+        "parent_share_imputed": "Y" if (gem_imputed or share_imputed) else "",
+    }
 
 
 def _build_gogpt_operators(plant: dict, unit: dict, ctx: dict):
@@ -2031,8 +2178,7 @@ def _gogpt_build_row(plant: dict, unit: dict, ctx: dict) -> dict:
     major_area = unit.get("unit_major_area") or plant.get("plant_major_area") or ""
 
     # Owner / Parent / Operator.
-    owner_str, owner_id_str, owner_ref, parent_str, parent_id_str = \
-        _build_gogpt_owners_parents(plant, unit, ctx)
+    own = _build_gogpt_owners_parents(plant, unit, ctx)
     operator_str, operator_ref, operator_id_str = _build_gogpt_operators(plant, unit, ctx)
 
     # Fuel (from unit_fuel) — but also there's a fallback to unit.technology_json
@@ -2060,22 +2206,36 @@ def _gogpt_build_row(plant: dict, unit: dict, ctx: dict) -> dict:
     # Conversion/replacement.
     conv = _build_gogpt_conversion(unit, ctx)
 
-    # Status / Years.
-    status_name = unit.get("status_name") or ""
-    start_year = _format_start_or_end_year(unit.get("start_year_low"), unit.get("start_year_high"))
-    # End-year columns: when `endYearPlanned=True`, the unit's end year is a
-    # planned retirement (goes into "Planned retire"); when false/null it's
-    # an actual retirement (goes into "Retired year"). `plannedRetiredYear`
-    # is a more recent revised plan that supersedes endYearLow when set.
-    end_year_low = unit.get("end_year_low")
-    end_year_high = unit.get("end_year_high")
-    end_year_planned = unit.get("end_year_planned")
-    if end_year_planned:
-        retired_year = ""
-        planned_retire = _fmt_year(unit.get("planned_retired_year") or end_year_low)
+    # Status / Years: from the combustion timelines (see
+    # _derive_gogpt_status_columns); the legacy unit columns are stale.
+    tl = _derive_gogpt_status_columns(
+        ctx["milestones"].get(unit_id, []),
+        ctx["scheduled"].get(unit_id, []),
+    )
+
+    # Captive block: unit-level details win when the unit itself is flagged
+    # captive, else the plant's when the plant is; otherwise every captive
+    # column is blank and Backup Power is 'no' (website rule).
+    if unit.get("unit_captive"):
+        captive = {
+            "use": unit.get("unit_captive_industry_use_option"),
+            "type_jsonb": unit.get("unit_captive_industry_type_jsonb"),
+            "non_industry": unit.get("unit_captive_non_industry_use_option"),
+            "ds": unit.get("unit_captive_ds"),
+            "backup": unit.get("unit_backup_power"),
+            "backup_ds": unit.get("unit_backup_power_ds"),
+        }
+    elif plant.get("plant_captive"):
+        captive = {
+            "use": plant.get("plant_captive_industry_use_option"),
+            "type_jsonb": plant.get("plant_captive_industry_type_jsonb"),
+            "non_industry": plant.get("plant_captive_non_industry_use_option"),
+            "ds": plant.get("plant_captive_ds"),
+            "backup": plant.get("plant_backup_power"),
+            "backup_ds": plant.get("plant_backup_power_ds"),
+        }
     else:
-        retired_year = _format_start_or_end_year(end_year_low, end_year_high)
-        planned_retire = _fmt_year(unit.get("planned_retired_year"))
+        captive = None
 
     # Linked projects.
     links = ctx["project_links"].get(plant_id, [])
@@ -2103,21 +2263,20 @@ def _gogpt_build_row(plant: dict, unit: dict, ctx: dict) -> dict:
         "Capacity Per Engine": _fmt_min1dp(unit.get("capacity_per_engine")),
         "Capacity (MW)": _fmt_min1dp(unit.get("capacity")),
         "Capacity Data Source": refs(unit.get("capacity_ds")),
-        "Status": status_name,
+        "Status": tl["status"],
         "Status Detail": unit.get("status_detail") or "",
-        "Status Data Source": refs(unit.get("status_ds")),
-        "Disrupted due to conflict": _fmt_bool_yes_blank(unit.get("disrupted")),
-        "Disrupted due to conflict Data Source": (
-            refs(unit.get("disrupted_ds")) if unit.get("disrupted") else ""
-        ),
+        "Status Data Source": refs(tl["status_ds"]),
+        "Disrupted by conflict": "yes" if unit.get("disrupted") else "no",
+        "Disrupted by conflict Data Source": refs(unit.get("disrupted_ds")),
+        "IRP": "yes" if unit.get("irp") else "no",
         "Latest Activity": _fmt_latest_activity(
             unit.get("latest_activity_year"),
             unit.get("latest_activity_month"),
             unit.get("latest_activity_day"),
         ),
         "Latest Activity Data Source": refs(unit.get("latest_activity_ds")),
-        "Cancellation year": _fmt_year(unit.get("cancellation_year")),
-        "Cancellation year Data Source": refs(unit.get("cancellation_year_ds")),
+        "Cancellation year": tl["cancellation_year"],
+        "Cancellation year Data Source": refs(tl["cancellation_ds"]),
         "Turbine/Engine Technology": turbine_tech,
         "Turbine/Engine Technology Data Source": refs(unit.get("technology_ds")),
         "Equipment Manufacturer/Model": turbine_mfr_model,
@@ -2142,26 +2301,22 @@ def _gogpt_build_row(plant: dict, unit: dict, ctx: dict) -> dict:
         "Conversion/replacement Data Source": refs(conv["ds"]),
         "Conversion to (fuel)": conv["to_fuel"],
         "Conversion to (GEM unit ID)": conv["to_id"],
-        "Start year": start_year,
-        "Start Year Data Source": refs(unit.get("start_year_ds")),
-        "Retired year": retired_year,
-        "Retired Year Data Source": refs(unit.get("end_year_ds")),
-        "Planned retire": planned_retire,
-        # When the planned-retire year comes from endYearLow (endYearPlanned=True)
-        # rather than a separately-revised plannedRetiredYear, its data source
-        # is endYearDatasource, not plannedRetiredDatasource.
-        "Planned Retire Data Source": refs(
-            unit.get("planned_retired_ds")
-            or (unit.get("end_year_ds") if end_year_planned else None)
-        ),
+        "Start year": tl["start_year"],
+        "Start Year Data Source": refs(tl["start_ds"]),
+        "Retired year": tl["retired_year"],
+        "Retired Year Data Source": refs(tl["retired_ds"]),
+        "Planned retire": tl["planned_retire"],
+        "Planned Retire Data Source": refs(tl["planned_retire_ds"]),
         "Operator(s)": operator_str,
         "Operators Data Source": operator_ref,
         "Operator GEM Entity ID": operator_id_str,
-        "Owner(s)": owner_str,
-        "Owner(s) GEM Entity ID": owner_id_str,
-        "Owners Data Source": owner_ref,
-        "Parent(s)": parent_str,
-        "Parent GEM Entity ID": parent_id_str,
+        "Owner(s)": own["owners"],
+        "Owner Share Imputed": own["owner_share_imputed"],
+        "Owner(s) GEM Entity ID": own["owner_ids"],
+        "Owners Data Source": own["owners_ds"],
+        "Parent(s)": own["parents"],
+        "Parent GEM Entity ID": own["parent_ids"],
+        "Parent Share Imputed": own["parent_share_imputed"],
         "Latitude": loc_lat,
         "Longitude": loc_lon,
         "Location accuracy": loc_accuracy,
@@ -2175,13 +2330,14 @@ def _gogpt_build_row(plant: dict, unit: dict, ctx: dict) -> dict:
         "Other IDs (location)": other_ids_loc,
         "Other IDs (unit)": other_ids_unit,
         "Notes": plant.get("plant_notes") or "",
-        "Captive industry use": plant.get("plant_captive_industry_use_option") or "",
+        "Captive industry use": (captive["use"] or "") if captive else "",
         "Captive industry type": _format_captive_industry_type(
-            plant.get("plant_captive_industry_type_jsonb"),
-            ctx["captive_industry_type_names"],
-        ),
-        "Captive non-industry use": plant.get("plant_captive_non_industry_use_option") or "",
-        "Captive Data Source": refs(plant.get("plant_captive_ds")),
+            captive["type_jsonb"], ctx["captive_industry_type_names"],
+        ) if captive else "",
+        "Captive non-industry use": (captive["non_industry"] or "") if captive else "",
+        "Captive Data Source": refs(captive["ds"]) if captive else "",
+        "Backup Power": "yes" if captive and captive["backup"] else "no",
+        "Backup Power Data Source": refs(captive["backup_ds"]) if captive else "",
         "GEM location ID": f"{ID_PREFIX_LOCATION}{plant_id}",
         "GEM unit ID": f"{ID_PREFIX_UNIT}{unit_id}",
         "WEPP location ID": wepp_loc,
@@ -2203,6 +2359,7 @@ def export_gogpt_all_fields(engine: Engine, out_path: str, limit: int | None = N
     unit_ids = [u["unit_id"] for u in units]
 
     # Bulk-fetch every related lookup.
+    milestones, scheduled = _fetch_combustion_timelines(engine, unit_ids)
     unit_fuels = _fetch_unit_fuels(engine, unit_ids)
     unit_turbines = _fetch_unit_turbines(engine, unit_ids)
     replacements_by_unit = _fetch_unit_replacements(engine, unit_ids)
@@ -2274,12 +2431,11 @@ def export_gogpt_all_fields(engine: Engine, out_path: str, limit: int | None = N
         _absorb(p.get("plant_location_ds"))
         _absorb(p.get("employment_notes_ds"))
         _absorb(p.get("plant_captive_ds"))
+        _absorb(p.get("plant_backup_power_ds"))
     for u in units:
         _absorb(u.get("capacity_ds"))
-        _absorb(u.get("status_ds"))
         _absorb(u.get("disrupted_ds"))
         _absorb(u.get("latest_activity_ds"))
-        _absorb(u.get("cancellation_year_ds"))
         _absorb(u.get("fuel_ds"))
         _absorb(u.get("turbine_ds"))
         _absorb(u.get("technology_ds"))
@@ -2287,10 +2443,12 @@ def export_gogpt_all_fields(engine: Engine, out_path: str, limit: int | None = N
         _absorb(u.get("h2_criteria_ds"))
         _absorb(u.get("ccs_ds"))
         _absorb(u.get("chp_ds"))
-        _absorb(u.get("start_year_ds"))
-        _absorb(u.get("end_year_ds"))
-        _absorb(u.get("planned_retired_ds"))
         _absorb(u.get("unit_location_ds"))
+        _absorb(u.get("unit_captive_ds"))
+        _absorb(u.get("unit_backup_power_ds"))
+    for lst in list(milestones.values()) + list(scheduled.values()):
+        for r in lst:
+            _absorb(r.get("statusDatasource"))
     for lst in replacements_by_unit.values():
         for r in lst:
             _absorb(r.get("replacement_ds"))
@@ -2302,8 +2460,19 @@ def export_gogpt_all_fields(engine: Engine, out_path: str, limit: int | None = N
             _absorb(o.get("op_ds"))
     data_sources = _fetch_data_sources(engine, ds_ids)
 
+    # Parent-column names: every company id in the owners' baked parent chains.
+    parent_ids: set[int] = set()
+    for lst in list(owners_by_plant.values()) + list(owners_by_unit.values()):
+        for o in lst:
+            for parent in _owner_parent_rows(o):
+                parent_ids.add(int(parent["id"]))
+    parent_names = _fetch_company_parent_names(engine, sorted(parent_ids))
+
     ctx = {
         "data_sources": data_sources,
+        "milestones": milestones,
+        "scheduled": scheduled,
+        "parent_names": parent_names,
         "unit_fuels": unit_fuels,
         "unit_turbines": unit_turbines,
         "replacements_by_unit": replacements_by_unit,
