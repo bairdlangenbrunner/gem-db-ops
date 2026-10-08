@@ -21,6 +21,11 @@ Postgres pulls:
   Ownership columns follow Django's "enhanced implied share" rules. The
   derivation is documented in `docs/ALL_FIELDS_STATUS.md` ("GOGPT: status
   timelines and ownership").
+- "which combustion units have no tracker" → `python gogpt/no_tracker.py
+  [--country X --state Y] [--include-deleted]` → `gogpt/no_tracker.csv` + a
+  summary. `trackerSearch` is null when a unit has no fuel or several fuels
+  and no primary one; those units are in no tracker's export (the web UI's
+  "No tracker found" search choice). Deleted rows are skipped by default.
 - "pull GOGET" → `python goget/pull.py` → `goget/gem_export_goget_tables/`
   (one CSV per table + manifest; no flat all-fields exporter exists for GOGET;
   `plant_history` excluded unless `--include-history`). Soft-deleted records

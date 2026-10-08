@@ -33,6 +33,7 @@ there for the open `AltFuelNotes` question).
 | Fresh export | `python ../../gem-db-ops/gogpt/pull.py --output gem_export_gogpt.csv` (from `scripts/`) |
 | Column map | `python pull_gem_db.py --map-only` — alias of `gem_colmap.GOGPT_EXPECTED_COLUMNS`; keeps only the repo-specific `READ_ONLY_COMPUTED` / `READ_ONLY_OUT_OF_SCOPE` derivations |
 | Then | `python scope_filter.py` — the export is every combustion unit (oil+gas+coal+bio), so the GOGPT-only view is derived locally on purpose. Keep the unfiltered CSV for coal-conversion cross-checks. |
+| "No tracker found" units | `gogpt/no_tracker.py` (`fetch_no_tracker(engine, country, state, include_deleted)`): combustion units with `trackerSearch` null, the web UI's "No tracker found" search choice. The consumer's `scripts/no_tracker.py --state/--country` scopes it for the checklist's row 56 close-out. |
 | Sibling paths | `scripts/paths.py` → `db_ops_repo()` |
 
 Must not re-add: the 86-column map (add new columns in `gem_colmap.py`, and
