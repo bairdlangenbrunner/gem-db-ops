@@ -97,6 +97,7 @@ also no CI credential: the `gem-analysis` service account was deleted
   not wire it back into any pull path without asking.
 - `schema_dbml.py` — dumps the live schema as DBML to `docs/gem_schema.dbml`;
   paste into https://dbdiagram.io/d for an up-to-date relational diagram.
+  `--check` prints the structural drift against that file without writing (exit 1 on drift). A SessionStart hook (`.claude/hooks/schema_drift.sh`, wired in `.claude/settings.json`) runs the check at most once a week, regenerates the file on drift, and tells the session what changed.
 
 ## Notes
 

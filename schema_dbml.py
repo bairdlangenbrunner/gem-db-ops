@@ -15,6 +15,7 @@ Usage:
     python schema_dbml.py                     # -> docs/gem_schema.dbml
     python schema_dbml.py -o my.dbml
     python schema_dbml.py --include-system
+    python schema_dbml.py --check             # print drift vs the file, exit 1 if any
 """
 import argparse
 import datetime
@@ -35,7 +36,8 @@ SYSTEM_TABLES = {"user_settings"}
 # "other" (a new table showing up there is the cue to re-home it here).
 GROUPS = {
     "core_project": [
-        "plant", "powerplant_unit", "status_timeline", "operator",
+        "plant", "powerplant_unit", "status_timeline", "milestone_timeline",
+        "scheduled_events_timeline", "operator",
         "plant_owner", "plant_language", "plant_external_id",
         "unit_external_id", "project_geospatial", "project_links",
         "project_update", "unit_update", "project_country_subdivision",
@@ -47,6 +49,10 @@ GROUPS = {
         "org_id", "ultimate_parent_rationale", "legal_entity_type",
     ],
     "lng": ["lng_project", "lng_unit"],
+    "coal_mine": [
+        "coal_mine_project", "coal_mine_unit", "coal_mine_production",
+        "coalfield",
+    ],
     "goget": ["goget_project", "reserves_production", "reserve_type"],
     "steel_iron": [
         "steel_project", "steel_unit", "steel_product",
@@ -169,16 +175,52 @@ def emit_dbml(tables, cols, pks, fks) -> str:
     return "\n".join(out)
 
 
+def parse_dbml(dbml: str):
+    """({table: {column line}}, {Ref line}) — enough to diff two dumps."""
+    tables, refs, cur = {}, set(), None
+    for line in dbml.splitlines():
+        if line.startswith("Table "):
+            cur = tables.setdefault(line.split()[1], set())
+        elif line == "}":
+            cur = None
+        elif cur is not None and line.strip():
+            cur.add(line.strip())
+        elif line.startswith("Ref: "):
+            refs.add(line)
+    return tables, refs
+
+
+def drift(old: str, new: str) -> list[str]:
+    """Human-readable structural differences; [] when only the stamp differs."""
+    ot, orefs = parse_dbml(old)
+    nt, nrefs = parse_dbml(new)
+    out = [f"+ table {t}" for t in sorted(nt.keys() - ot.keys())]
+    out += [f"- table {t}" for t in sorted(ot.keys() - nt.keys())]
+    for t in sorted(nt.keys() & ot.keys()):
+        out += [f"+ {t}.{c}" for c in sorted(nt[t] - ot[t])]
+        out += [f"- {t}.{c}" for c in sorted(ot[t] - nt[t])]
+    out += [f"+ {r}" for r in sorted(nrefs - orefs)]
+    out += [f"- {r}" for r in sorted(orefs - nrefs)]
+    return out
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     p.add_argument("-o", "--output", type=Path, default=DEFAULT_OUT)
     p.add_argument("--include-system", action="store_true",
                    help="Include Django/auth plumbing tables")
+    p.add_argument("--check", action="store_true",
+                   help="Don't write; print drift vs --output, exit 1 if any")
     args = p.parse_args()
 
     engine = build_engine(get_database_url(), DEFAULT_STATEMENT_TIMEOUT_MS)
     tables, cols, pks, fks = fetch_schema(engine, args.include_system)
     dbml = emit_dbml(tables, cols, pks, fks)
+    if args.check:
+        old = args.output.read_text() if args.output.exists() else ""
+        changes = drift(old, dbml)
+        print("\n".join(changes) if changes else f"{args.output} matches the live schema")
+        sys.exit(1 if changes else 0)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(dbml)
     print(f"wrote {args.output} ({len(tables)} tables, {len(fks)} refs)",

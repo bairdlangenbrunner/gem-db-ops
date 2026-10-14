@@ -177,6 +177,7 @@ at all; the website then prints a blank Status, and so do we.
 - Owner share: `plant_owner.share` if set. Otherwise, if the owner has a
   company and there are blank-share owners: remainder = 100 − sum(set shares);
   0 if that is ≤ 0, else remainder / number of blank owners, quantized to 0.1.
+- The database now stores this value as `plant_owner.enhancedImpliedShare` (filled on every row). On 2026-10-08 it matched our computation on all 17,770 combustion owner rows, so the exporter could read the column instead of computing it.
 - Owner display is `name [int(share)%]` — truncation, not rounding.
 - `Owner Share Imputed` = `Y` when any owner's share was computed this way.
 - Parents come from `company.gemParentsImputedJSON` (fallback
@@ -260,7 +261,7 @@ These are the things I'd want to remember if picking this up later:
 7. **FX is a fixed table, not a per-year one.** The implied rate for each
    `costUnit` is identical across every `CostYear` in the export, so no
    historical series is needed. There is no currency table anywhere in the
-   read-only Postgres (72 tables checked), so `CURRENCY_TO_USD` /
+   read-only Postgres (78 tables checked 2026-10-08), so `CURRENCY_TO_USD` /
    `CURRENCY_TO_EUR` in `gem_all_fields.py` are reproduced from a download.
    `CostEuro` has its **own** table — it is not `CostUSD / 1.09`; GBP is 1.156
    where the derivation would give 1.1559 — and is quantized to 2dp.

@@ -95,6 +95,7 @@ PROJECT_TYPES: dict[str, int] = {
     "hydro": 7,
     "lng": 8,
     "goget": 9,
+    "coal-mine": 10,
 }
 PROJECT_TYPE_NAMES: dict[int, str] = {v: k for k, v in PROJECT_TYPES.items()}
 
@@ -139,6 +140,7 @@ REFERENCE_TABLES: frozenset[str] = frozenset({
     "capacity_rating",
     "captive_industry_type", "captive_industry_use", "captive_non_industry_use",
     "ccs", "chp",
+    "coalfield",
     "country", "country_subdivision",
     "entity_status", "entity_tag", "entity_type",
     "external_id_system",

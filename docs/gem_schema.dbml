@@ -1,5 +1,5 @@
-// GEM relational database schema — generated 2026-07-21 from the live read-only Postgres by schema_dbml.py.
-// 72 tables, 96 foreign keys. Paste into https://dbdiagram.io/d to view.
+// GEM relational database schema — generated 2026-10-08 from the live read-only Postgres by schema_dbml.py.
+// 78 tables, 103 foreign keys. Paste into https://dbdiagram.io/d to view.
 
 Table capacity_rating {
   id int8 [pk]
@@ -29,6 +29,97 @@ Table ccs {
 Table chp {
   id int8 [pk]
   option text
+}
+
+Table coal_mine_production {
+  id int8 [pk]
+  year int4
+  "romOrSaleable" text
+  "romOrSaleableDatasource" jsonb
+  "productionOrCapacity" text
+  "coalOutputDatasource" jsonb
+  "outputAccuracy" text
+  notes text
+  plant_id int8 [not null]
+  unit_id int8
+  "coalOutputMst" numeric
+  "coalOutputMt" numeric
+}
+
+Table coal_mine_project {
+  id int8 [pk]
+  coalfield_id int8
+  "coalfieldDatasource" jsonb
+  "notesDatasource" jsonb
+  project_id int8 [not null]
+  "coalChemicalPath" text
+}
+
+Table coal_mine_unit {
+  id int8 [pk]
+  "mineType" text
+  "mineTypeDatasource" jsonb
+  "miningMethod" text
+  "miningMethodDatasource" jsonb
+  "mineArea" numeric
+  "mineAreaDatasource" jsonb
+  "mineDepth" numeric
+  "mineDepthDatasource" jsonb
+  "depthAccuracy" text
+  "depthAccuracyDatasource" jsonb
+  "workforceSize" int4
+  "workforceSizeDatasource" jsonb
+  "workforceAccuracy" text
+  "workforceAccuracyDatasource" jsonb
+  unit_id int8 [not null]
+  "coalGrade" text
+  "coalGradeDatasource" jsonb
+  "coalOutputDatasource" jsonb
+  "coalType" text
+  "coalTypeDatasource" jsonb
+  "percAccuracy" text
+  "percDatasource" jsonb
+  "percMetCoal" numeric
+  "percThermalCoal" numeric
+  "percYear" int4
+  "totalCoalMined" numeric
+  "totalCoalMinedDatasource" jsonb
+  "totalCoalRemaining" numeric
+  "totalCoalRemainingDatasource" jsonb
+  "totalReserves" numeric
+  "totalReservesDatasource" jsonb
+  "totalReservesYear" int4
+  "totalResource" numeric
+  "totalResourceDatasource" jsonb
+  "unitPhase" text
+  "unitPhaseDatasource" jsonb
+  "unitType" text
+  "unitTypeDatasource" jsonb
+  "closingMethod" text
+  "closingMethodDatasource" jsonb
+  "closingMethodDetails" text
+  "closureDetail" text
+  "closureReason" text
+  "closureReasonDatasource" jsonb
+  "gasLevelRating" text
+  "gasLevelRatingDatasource" jsonb
+  "gasLevelRatingYear" int4
+  "mineSiteStatus" text
+  "mineSiteStatusDatasource" jsonb
+  "mineSiteStatusDetail" text
+  capacity numeric
+  "originalOpeningYear" int4
+  "originalOpeningYearDatasource" jsonb
+  "coalOutputMst" numeric
+  "coalOutputMt" numeric
+  "mineLife" text
+  "mineLifeDatasource" jsonb
+  "mineLifeReportedYear" int4
+}
+
+Table coalfield {
+  id int8 [pk]
+  name text
 }
 
 Table comment {
@@ -77,6 +168,8 @@ Table company {
   "jointVenture" text
   "gemParentsJSON" text
   "endOfBranchesJSON" text
+  "endOfBranchesImputedJSON" text
+  "gemParentsImputedJSON" text
 }
 
 Table company_owner {
@@ -362,6 +455,21 @@ Table lng_unit {
   trains text
 }
 
+Table milestone_timeline {
+  id int8 [pk]
+  status text
+  substatus text
+  "statusDatasource" jsonb
+  "eventYear" int4
+  "eventMonthOrHalfYear" text
+  notes text
+  created timestamptz [not null]
+  modified timestamptz [not null]
+  unit_id int8 [not null]
+  order int4 [not null]
+  "makeCurrent" bool
+}
+
 Table nuclear_model {
   id int8 [pk]
   name text [not null]
@@ -460,6 +568,7 @@ Table plant {
   "backupPower" bool
   "backupPowerDatasource" jsonb
   "plantJSON_z" bytea
+  "locationLocal" text
 }
 
 Table plant_external_id {
@@ -493,6 +602,7 @@ Table plant_owner {
   plant_id int8
   powerplant_unit_id int8
   "impliedShare" numeric
+  "enhancedImpliedShare" numeric
 }
 
 Table powerplant_unit {
@@ -648,6 +758,7 @@ Table powerplant_unit {
   "unitJSON_z" bytea
   "numberOfTurbines" int4
   "numberOfTurbinesDatasource" jsonb
+  "locationLocal" text
 }
 
 Table project_country_subdivision {
@@ -768,6 +879,25 @@ Table reserves_production {
   "reserveProductionDatasource" jsonb
   notes text
   project_id int8 [not null]
+}
+
+Table scheduled_events_timeline {
+  id int8 [pk]
+  status text
+  substatus text
+  "statusDatasource" jsonb
+  "eventYear" int4
+  "eventMonthOrHalfYear" text
+  "dataSourceYear" int4
+  "dataSourceMonthOrHalfYear" text
+  notes text
+  created timestamptz [not null]
+  modified timestamptz [not null]
+  unit_id int8 [not null]
+  order int4 [not null]
+  withdrawn bool
+  "withdrawnMonthOrHalfYear" text
+  "withdrawnYear" int4
 }
 
 Table status {
@@ -1075,6 +1205,8 @@ TableGroup core_project {
   plant
   powerplant_unit
   status_timeline
+  milestone_timeline
+  scheduled_events_timeline
   operator
   plant_owner
   plant_language
@@ -1107,6 +1239,13 @@ TableGroup entity_company {
 TableGroup lng {
   lng_project
   lng_unit
+}
+
+TableGroup coal_mine {
+  coal_mine_project
+  coal_mine_unit
+  coal_mine_production
+  coalfield
 }
 
 TableGroup goget {
@@ -1167,6 +1306,11 @@ TableGroup datahub {
   datahub_tracker
 }
 
+Ref: coal_mine_production.plant_id > plant.id
+Ref: coal_mine_production.unit_id > powerplant_unit.id
+Ref: coal_mine_project.coalfield_id > coalfield.id
+Ref: coal_mine_project.project_id > plant.id
+Ref: coal_mine_unit.unit_id > powerplant_unit.id
 Ref: comment.thread_id > thread.id
 Ref: company.country_id > country.id
 Ref: company."entityStatus_id" > entity_status.id
@@ -1192,6 +1336,7 @@ Ref: goget_project.project_id > plant.id
 Ref: iron_yearly_production.plant_id > plant.id
 Ref: lng_project.project_id > plant.id
 Ref: lng_unit.unit_id > powerplant_unit.id
+Ref: milestone_timeline.unit_id > powerplant_unit.id
 Ref: operator.company_id > company.id
 Ref: operator.plant_id > plant.id
 Ref: operator.powerplant_unit_id > powerplant_unit.id
@@ -1245,6 +1390,7 @@ Ref: project_update."researchStatus_id" > research_status.id
 Ref: relining_details."reliningCostUnit_id" > relining_cost_unit.id
 Ref: relining_details.unit_id > powerplant_unit.id
 Ref: reserves_production.project_id > plant.id
+Ref: scheduled_events_timeline.unit_id > powerplant_unit.id
 Ref: status_timeline.unit_id > powerplant_unit.id
 Ref: steel_project.project_id > plant.id
 Ref: steel_unit.unit_id > powerplant_unit.id
