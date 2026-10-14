@@ -59,10 +59,12 @@ URL.
 | What | How |
 |---|---|
 | Connection | `scripts/gem_db.py` → `build_readonly_engine()` / `fetch_all(query)`, borrowed from `gem_query.build_engine()` |
-| Users | `scripts/build_lng_map_data.py`, `scripts/build_goget_areas.py` |
+| Users | `scripts/build_lng_map_data.py`, `scripts/build_goget_areas.py`, `scripts/build_goget_map_data.py` (both GOGET builders via `scripts/goget_db.py`, which runs `gem_all_fields.export_goget_all_fields` to a temp CSV and imports `_fetch_company_parent_names` for parent names; its bulk-upload overlay imports `_derive_goget_status` and `_fmt_year`), `scripts/build_gogpt_map_data.py` (runs `gem_all_fields.export_gogpt_all_fields` to a temp CSV) |
+| Schedule | `.github/workflows/build-map-data.yml` checks this repo out beside the maps repo and rebuilds all four map files from the database daily (since 2026-10-14; GOGET and GOGPT came from the data team's CDN exports before) |
 
-Must not re-add: the `psycopg2.connect` those two builders used before
-2026-08-11. Extend `scripts/gem_db.py` if a new query needs something.
+Must not re-add: the `psycopg2.connect` the builders used before
+2026-08-11, or the CDN export downloads. Extend `scripts/gem_db.py` if a new
+query needs something.
 
 ## goit-ggit-data-ops (release production)
 

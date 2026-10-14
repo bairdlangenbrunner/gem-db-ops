@@ -263,6 +263,59 @@ GOGPT_EXPECTED_COLUMNS: dict[str, str] = {
     "linked_projects": "Linked Projects",
 }
 
+# Oil & gas extraction (GOGET) — gem_all_fields.export_goget_all_fields, 46
+# columns, the website's `all_goget` report header (GEM-project-db
+# ALL_GOGET_FIELDS, read 2026-10-14). NB "Unit ID" / "Unit Name" hold the
+# PLANT id ('L' prefix) and plant name — the website renames them that way.
+GOGET_EXPECTED_COLUMNS: dict[str, str] = {
+    "unit_type": "Unit Type",
+    "project": "Project",
+    "concession_block": "Concession/Block",
+    "basin": "Basin",
+    "unit_id": "Unit ID",
+    "unit_name": "Unit Name",
+    "base_name": "Base Name",
+    "unit_local_script": "Unit local script",
+    "other_names": "Other Names",
+    "fuel_type": "Fuel type",
+    "country": "Country/Area",
+    "subnational": "Subnational unit",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "location_accuracy": "Location accuracy",
+    "project_outline_wkt": "Project outline (WKT)",
+    "onshore_offshore": "Onshore/Offshore",
+    "production_type": "Production Type",
+    "status": "Status",
+    "status_detail": "Status detail",
+    "status_year": "Status year",
+    "discovery_year": "Discovery year",
+    "fid_year": "FID Year",
+    "production_start_year": "Production start year",
+    "operator": "Operator",
+    "owner": "Owner(s)",
+    "government_unit_id": "Government unit ID",
+    "rystad_id": "Rystad ID",
+    "latest_reserves": "Latest Reserves",
+    "latest_cumulative_prod": "Latest Cumulative Prod",
+    "latest_production": "Latest Production",
+    "latest_design_capacity_prod": "Latest Design Capacity Prod",
+    "wiki_url": "Wiki URL",
+    "keep_makewiki": "Keep (makeWIKI)",
+    "offshore_ref": "Offshore Data Source",
+    "production_type_ref": "Productiontype Data Source",
+    "project_complex_ref": "Projectcomplex Data Source",
+    "concession_block_ref": "Concessionblock Data Source",
+    "basin_ref": "Basin Data Source",
+    "operator_ref": "Operators Data Source",
+    "owner_ref": "Owners Data Source",
+    "location_ref": "Location Data Source",
+    "status_ref": "Status Data Source",
+    "discovery_year_ref": "Discovery Year Data Source",
+    "fid_year_ref": "Fid Year Data Source",
+    "production_start_year_ref": "Production Start Year Data Source",
+}
+
 # Columns shared by the two pipeline tabs (GGIT gas / GOIT oil+NGL) in the
 # backend Sheet. These are NOT a full column list — the tabs carry 132 / 107
 # columns and researchers add more — just the ones consumers address by name.
@@ -464,6 +517,7 @@ PIPELINE_OWNERS_EXPECTED_COLUMNS: dict[str, str] = {
 EXPECTED_COLUMNS_BY_TRACKER: dict[str, dict[str, str]] = {
     "lng": LNG_EXPECTED_COLUMNS,
     "gogpt": GOGPT_EXPECTED_COLUMNS,
+    "goget": GOGET_EXPECTED_COLUMNS,
     "ggit": GGIT_EXPECTED_COLUMNS,
     "goit": GOIT_EXPECTED_COLUMNS,
     "pipeline_owners": PIPELINE_OWNERS_EXPECTED_COLUMNS,

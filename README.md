@@ -13,7 +13,7 @@ Two backends, five trackers:
 |---|---|---|---|---|
 | `lng/` | LNG terminals (GGIT-LNG) | Postgres | `python lng/pull.py` | flat 115-col all-fields CSV + colmap |
 | `gogpt/` | Oil & gas power plants (GOGPT) | Postgres | `python gogpt/pull.py` | flat 91-col all-fields CSV + colmap |
-| `goget/` | Oil & gas extraction (GOGET) | Postgres | `python goget/pull.py` | one CSV per table + manifest |
+| `goget/` | Oil & gas extraction (GOGET) | Postgres | `python goget/pull.py` | flat 46-col all-fields CSV + colmap, plus one CSV per table + manifest |
 | `ggit/` | Gas pipelines (GGIT) | Google Sheet | `python ggit/pull.py` | pipelines tab as CSV + colmap |
 | `goit/` | Oil/NGL pipelines (GOIT) | Google Sheet | `python goit/pull.py` | pipelines tab as CSV + colmap |
 
@@ -27,11 +27,15 @@ Note the split inside GGIT: its **pipelines** are the Sheet (`ggit/pull.py`), it
 Both pipeline pulls take `--with-owners` to also pull the pipeline
 operators/owners tab. Every CSV lands with a `.colmap.json` header→index map
 derived from the actual header row (never hard-code column offsets — both
-backends drift). `goget` has no flat all-fields exporter, so its pull is a
-multi-table export (`plant_history` excluded by default — it's multi-GB); it
-keeps soft-deleted records (GOGET deletes at the plant level; rows stay in
-Postgres with `plant.deleted` set) and propagates the flag into every child CSV
-as appended `plant_deleted` / `plant_deletedTimestamp` columns.
+backends drift). `goget/pull.py` writes two things: the flat all-fields CSV
+(one row per project, a port of the website's `all_goget` report; the
+`Project outline (WKT)` column runs to ~2 MB, so readers need
+`csv.field_size_limit(sys.maxsize)`) and a multi-table export (`plant_history`
+excluded by default — it's multi-GB); `--flat-only` / `--tables-only` pick one.
+The table export keeps soft-deleted records (GOGET deletes at the plant level;
+rows stay in Postgres with `plant.deleted` set) and propagates the flag into
+every child CSV as appended `plant_deleted` / `plant_deletedTimestamp` columns;
+the flat CSV excludes them, as the website does.
 
 ## Setup
 
@@ -68,17 +72,20 @@ also no CI credential: the `gem-analysis` service account was deleted
 
 - `gem_query.py` — the Postgres engine: read-only connection
   (`build_engine()`), schema introspection, single-table / multi-table
-  (FK-traversal) exports, and the `--all-fields {lng,gogpt}` dispatch. Works
+  (FK-traversal) exports, and the `--all-fields {lng,gogpt,goget}` dispatch. Works
   for ANY project type (`--project-type lng|combustion|goget|steel|...`).
   Consumers that need their own SQL should borrow `build_engine()` rather than
   calling `create_engine`/`psycopg2.connect` — it is what sets
   `default_transaction_read_only=on` and a statement timeout on every session.
 - `gem_all_fields.py` — library reproducing the website's flat "Export all
-  fields" CSVs from Postgres (LNG: 115 cols; GOGPT: 91 cols). **Running it
-  directly is a no-op** — it's imported by `gem_query.py --all-fields` and the
-  per-tracker `pull.py` scripts. Validation notes: `docs/ALL_FIELDS_STATUS.md`.
-  No GOGET exporter yet — port one here following the lng/gogpt pattern if
-  needed.
+  fields" CSVs from Postgres (LNG: 115 cols; GOGPT: 91 cols; GOGET: 46 cols).
+  Each exporter is a port of the matching Django report generator in the
+  website repo `GlobalEnergyMonitor/GEM-project-db` (`projects/project_display.py`
+  plus `timeline_status.py` / `ownership.py`), which is the ground truth and is
+  read-only to us; see `CLAUDE.md` for how to read its current code and
+  `docs/ALL_FIELDS_STATUS.md` for the per-column Django reference and the
+  known deliberate divergences. **Running it directly is a no-op** — it's
+  imported by `gem_query.py --all-fields` and the per-tracker `pull.py` scripts.
 - `gem_sheets.py` — the Sheets engine: `gws`-based read-only access, the
   pipelines-sheet key, and the tab registry (`ggit`, `goit`,
   `pipeline_owners`, `hydrogen`) with each tab's header-row offset. CLI:

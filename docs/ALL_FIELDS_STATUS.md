@@ -1,4 +1,4 @@
-# GEM "All Fields" LNG + GOGPT Export — Progress Notes
+# GEM "All Fields" LNG + GOGPT + GOGET Export — Progress Notes
 
 > **Restructure notes.** 2026-07-21: the repo has per-tracker pull folders
 > (`lng/`, `gogpt/`, `goget/`, each with a `pull.py`); the scripts described
@@ -21,7 +21,9 @@ Last touched: 2026-05-22.
   (one row per `lng_unit`).
 - `python gem_query.py --all-fields gogpt -o gogpt.csv` — 91-col GOGPT CSV
   (one row per combustion-projectType `powerplant_unit`).
-- CLI flag accepts `lng` or `gogpt`; passing neither is an error.
+- `python gem_query.py --all-fields goget -o goget.csv` — 46-col GOGET CSV
+  (one row per GOGET project; see the GOGET section below).
+- CLI flag accepts `lng`, `gogpt` or `goget`; passing none is an error.
 
 Validated against fresh website exports:
 
@@ -30,11 +32,12 @@ Validated against fresh website exports:
 | LNG   | `all-fields-2026-05-22T181922.csv`    | 1,261 | 96.46% | 8.01% |
 | GOGPT | `GOGPT-all-2026-05-22T183522.csv`     | 34,515 | 99.29% | 65.21% |
 | GOGPT | `GOGPT-all-2026-09-15T174727.csv` (timeline rewrite, 2026-10-02) | 34,938 | see GOGPT section | — |
+| GOGET | `all-fields-2026-10-14T215255.csv` (ported 2026-10-14 from the Django code) | 16,932 | 99.03% | see GOGET section |
 
 Implementation in `gem_all_fields.py`; `gem_query.py` adds the `--all-fields`
-CLI choice and dispatches to `export_all_fields` (LNG) or
-`export_gogpt_all_fields` (GOGPT). Many format helpers are shared between the
-two exporters.
+CLI choice and dispatches to `export_all_fields` (LNG),
+`export_gogpt_all_fields` (GOGPT) or `export_goget_all_fields` (GOGET). Many
+format helpers are shared between the exporters.
 
 > **Note on the "GOGPT" filter:** the website's URL `?format=gas_all&tracker=GOGPT`
 > is misleading — the export actually contains *every* combustion-projectType
@@ -61,6 +64,9 @@ python gem_query.py --all-fields lng -o terminals.csv
 
 # GOGPT / oil & gas / combustion export (~34,500 rows, ~25 sec):
 python gem_query.py --all-fields gogpt -o gogpt.csv
+
+# GOGET / oil & gas extraction export (~16,900 rows, ~30 sec):
+python gem_query.py --all-fields goget -o goget.csv
 
 # Small sample for iterating (plant limit, not unit limit):
 python gem_query.py --all-fields lng --limit 30 -o /tmp/lng.csv
@@ -218,6 +224,29 @@ Pre-existing gaps, identical in the old and new exporter, not touched here:
 | CHP / CHP Data Source | 250 / 211 | website prints `no` / `not found`, we print blank |
 
 Reproduce with the diff script in "Useful one-liners".
+
+## GOGET: the `all_goget` port (added 2026-10-14)
+
+`export_goget_all_fields` reproduces the website's `all_goget` report (`GEM-project-db`, `projects/project_display.py`: `all_fields_csv_generator_goget` → `display_unit_search(..., tracker_type='goget')` → `display_goget_unit` → `map_fields(data, GOGET_MAP)`). Headers are `GOGET_COLUMNS` (46, in the website's order); the short-name map is `gem_colmap.GOGET_EXPECTED_COLUMNS`. `goget/pull.py` writes the same CSV plus its colmap.
+
+Shape: one row per plant with `projectType = 9` and `deleted = false` (16,932 on 2026-10-14; every GOGET plant has exactly one `powerplant_unit`, none deleted). Rows are sorted by Unit Name then plant id. The website's "Unit ID" is the plant id with an `L` prefix and "Unit Name" is the plant name (unit names differ from plant names for every row and are not exported).
+
+Where each column comes from:
+
+- `goget_project` (joined by `project_id`): Unit Type, Base Name (`namePrefix`), Fuel type, Onshore/Offshore (`offshore`, blank → `unknown`), Production Type, Basin, Concession/Block, Keep (makeWIKI) (`True` or blank), Project (the name of the plant `projectComplex_id` points at), and the `*Datasource` columns for offshore / productionType / projectComplex / concessionBlock / basin.
+- `plant`: Wiki URL (`wikiUrl`), Country/Area, Subnational unit, Location accuracy, Other Names (`plantJSON.nameOther`, deduplicated), Unit local script (`plant_language` names, the website's "Language Names"), Latitude / Longitude (the `plantJSON` string when `coordinateFormat` is `WGS 84 decimal` or blank, otherwise `latitudeText` / `longitudeText`; the JSON string is preferred because it carries the website's trailing zeros).
+- `project_geospatial`: Project outline (WKT), one row per project (3,683 have one). This column can exceed 2 MB, so a reader must raise `csv.field_size_limit`.
+- `status_timeline` (GOGET still uses it, not the combustion milestone tables): rows are grouped by `(status, substatus)` in `order`, and a group that reoccurs later moves to the end. Every group whose substatus is not `planned` overwrites Status / Status detail / Status year / Status Data Source with its last row. Discovery year is the first dated row of the first `discovered` group, FID Year the first dated row of the first non-planned `in-development` group, Production start year the first dated row of the first `operating` + `ramp up` group. 1,994 plants have no timeline rows and get blank status columns.
+- `plant_owner` + `company` + `legal_entity_type`: Owner(s) is `name legal_entity_type [NN%]` per owner, the share shown only when non-zero (GOGET is not an "implied share" tracker, so no parent math), `; `-joined, ordered by share descending.
+- `operator` + `company`: Operator is the bare company name (no legal-entity suffix, every `type`), deduplicated, `; `-joined.
+- `plant_external_id` + `external_id_system`: each id renders as `system name: id`. Rystad ID holds the ids whose system is `Rystad UCube` (the website takes `id[14:]`, the length of `Rystad UCube: `); Government unit ID holds every other one, comma-joined.
+- `reserves_production`: the four Latest columns are the latest `year` among rows whose `productionReserves` is `reserves`, `cumulative production`, `production` or `production design capacity` (years, not quantities, exactly as the website).
+- Data-source columns resolve the jsonb id lists through `data_source.url`, comma-joined.
+
+Validation: the port was checked against the Django logic line by line and against live rows for a handful of plants (for example Albacora, `L100000300008`: timeline discovered 1984 / operating ramp up 1987 / operating 2024 → Status `operating`, Status year 2024, Discovery year 1984, Production start year 1987; Rystad ID `BRF0261`; Government unit ID `ANEEL: 1190, Historical GOGET: OG0000008`; Latest Reserves 2024, Latest Cumulative Prod 2023, Latest Production 2025). It was then diffed against the website's own export of the same day (`all-fields-2026-10-14T215255.csv`, 46 columns, 16,932 rows, the same plant ids): 99.03% cell match (7,580 of 778,872 cells differ). Every remaining difference is one of two deliberate divergences:
+
+- Ordering inside multi-value cells (Government unit ID 3,597, Owner(s) 1,900, Rystad ID 200, Other Names 94, Operator 15, Unit local script 16, and the data-source columns): Django builds these as Python sets, so the website's order is arbitrary; ours is deterministic.
+- Live columns versus the website's cached `plantJSON`: Django feeds `plant.plantJSON` to `display_unit_search`, and that snapshot lags the live `goget_project` columns for some plants (Keep (makeWIKI) 1,310 rows where the live column is `True` and the JSON has no value, Project 98, Projectcomplex Data Source 63, Concession/Block and its data source 15 each). We read the live columns, which are the fresher value.
 
 ## Key things learned while building this
 

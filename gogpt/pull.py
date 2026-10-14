@@ -4,7 +4,13 @@ Pull the current GOGPT (oil & gas power plants) "all-fields" CSV from the GEM
 database and derive a header→index column map.
 
 Reads directly from the read-only Postgres (no cookies) via ../gem_query.py's
-engine + ../gem_all_fields.py's export_gogpt_all_fields. Requires:
+engine + ../gem_all_fields.export_gogpt_all_fields, a port of the website's
+`gas_all` report (GEM-project-db projects/project_display.py: GAS_ALL_FIELDS
+headers, GAS_MAP renames, display_unit_search + gas_unit_csv_generator row
+logic; status and years from projects/timeline_status.py, ownership from
+projects/ownership.py). 91 columns. Where the two differ on purpose (see
+docs/ALL_FIELDS_STATUS.md) it is because we order multi-value cells where
+Django uses a set. Requires:
 
     export GEM_READONLY_DB_URL='postgres://readonly:PASSWORD@HOST:5432/DBNAME'
 

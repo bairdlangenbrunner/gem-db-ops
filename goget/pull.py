@@ -1,37 +1,46 @@
 #!/usr/bin/env python3
 """
-Pull the current GOGET (oil & gas extraction) tables from the GEM database.
+Pull the current GOGET (oil & gas extraction) data from the GEM database.
 
-Cookie-free multi-table export from the read-only Postgres via
-../gem_query.py --project-type goget: one CSV per table (plant, goget_project,
-status_timeline, owners, reserves_production, ...) plus a _manifest.csv —
-NOT a single flat file. Requires:
+Two outputs, both straight from the read-only Postgres (no cookies). Requires:
 
     export GEM_READONLY_DB_URL='postgres://readonly:PASSWORD@HOST:5432/DBNAME'
 
-The multi-GB plant_history audit table is excluded by default
-(--include-history to add it).
+1. Flat "all-fields" CSV: goget/gem_export_goget.csv + .colmap.json, one row
+   per project (every GOGET plant has exactly one unit), 46 columns. This is
+   ../gem_all_fields.export_goget_all_fields, a port of the website's
+   `all_goget` report (GEM-project-db projects/project_display.py). Note the
+   website's naming: "Unit ID" / "Unit Name" are the PLANT id ('L' prefix) and
+   plant name. Soft-deleted plants are excluded, as on the website.
 
-Soft-deleted records are INCLUDED and marked: GOGET deletion happens at the
-plant level (`plant.deleted` / `plant.deletedTimestamp` — rows stay in
-Postgres). The export keeps those rows, and a post-pull pass propagates the
-flag into every child CSV as two appended columns, `plant_deleted` /
-`plant_deletedTimestamp` (resolved via plant_id/project_id/projectComplex_id,
-or unit_id -> powerplant_unit -> plant, or thread_id -> thread -> plant).
-`public.plant.csv` itself already carries the native columns.
+2. Multi-table dump: goget/gem_export_goget_tables/, one CSV per table (plant,
+   goget_project, status_timeline, owners, reserves_production, ...) plus a
+   _manifest.csv, via ../gem_query.py --project-type goget. The multi-GB
+   plant_history audit table is excluded by default (--include-history).
+   Soft-deleted records are INCLUDED and marked: GOGET deletion happens at
+   the plant level (`plant.deleted` / `plant.deletedTimestamp` — rows stay in
+   Postgres), so a post-pull pass propagates the flag into every child CSV as
+   two appended columns, `plant_deleted` / `plant_deletedTimestamp` (resolved
+   via plant_id/project_id/projectComplex_id, or unit_id -> powerplant_unit ->
+   plant, or thread_id -> thread -> plant). `public.plant.csv` itself already
+   carries the native columns.
 
-There is no flat "all-fields" CSV path for GOGET right now: ../gem_all_fields.py
-covers only lng + gogpt, and the cookie-based website exporter
-../gem_export_via_web.py is NOT in use (kept for reference only; do not wire
-it back in without asking the user). If a flat goget exporter is needed, port
-one into gem_all_fields.py following the lng/gogpt pattern and validate against
-a fresh website export (see docs/ALL_FIELDS_STATUS.md).
+(The cookie-based website exporter ../gem_export_via_web.py is NOT in use —
+kept for reference only; do not wire it back in without asking the user.)
 
 Usage:
-    python pull.py                      # -> goget/gem_export_goget_tables/*.csv
-    python pull.py --output my_dir      # custom output directory
+    python pull.py                      # both: flat CSV + colmap, then the tables
+    python pull.py --flat-only          # just goget/gem_export_goget.csv + .colmap.json
+    python pull.py --tables-only        # just goget/gem_export_goget_tables/
+    python pull.py --output my.csv      # custom flat CSV path
+    python pull.py --tables-dir my_dir  # custom tables directory
+    python pull.py --limit 30           # small flat sample (plant cap, for testing)
+    python pull.py --map-only           # skip fetching; derive the colmap from the existing CSV
     python pull.py --include-history    # also export plant_history (multi-GB)
-    python pull.py --mark-only          # re-run just the deleted-flag pass
+    python pull.py --mark-only          # skip the pull; re-run just the deleted-flag pass
+
+The expected-column map and the derive/report/save logic live in
+../gem_colmap.py so every tracker pull (and every consumer repo) uses one copy.
 """
 import argparse
 import csv
@@ -43,8 +52,15 @@ csv.field_size_limit(sys.maxsize)  # notes fields exceed the 128KB default
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+sys.path.insert(0, str(ROOT))
 
+import gem_colmap  # noqa: E402
+
+DEFAULT_OUT = HERE / "gem_export_goget.csv"
 DEFAULT_TABLES_DIR = HERE / "gem_export_goget_tables"
+
+# Canonical short name -> expected header text. Defined in ../gem_colmap.py.
+EXPECTED_COLUMNS = gem_colmap.GOGET_EXPECTED_COLUMNS
 
 # How a child row resolves to its plant(s), tried in this order. FK ground
 # truth (pg_constraint, 2026-07-21): plant_id/project_id/projectComplex_id all
@@ -54,6 +70,17 @@ PLANT_LINK_COLS = ("plant_id", "project_id", "projectComplex_id")
 UNIT_LINK_COLS = ("unit_id", "powerplant_unit_id")
 THREAD_LINK_COLS = ("thread_id",)
 MARK_COLS = ("plant_deleted", "plant_deletedTimestamp")
+
+
+def pull_flat(out_path: Path, limit=None):
+    """Flat all-fields export straight from the read-only Postgres."""
+    from gem_query import get_database_url, build_engine, DEFAULT_STATEMENT_TIMEOUT_MS
+    from gem_all_fields import export_goget_all_fields
+
+    engine = build_engine(get_database_url(), DEFAULT_STATEMENT_TIMEOUT_MS)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    n = export_goget_all_fields(engine, str(out_path), limit)
+    print(f"  wrote {n:,} project rows to {out_path}", file=sys.stderr)
 
 
 def pull_tables(out_dir: Path, include_history=False):
@@ -152,16 +179,36 @@ def mark_deleted(out_dir: Path):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
-    p.add_argument("--output", "--out", dest="out", type=Path, default=DEFAULT_TABLES_DIR,
-                   help="Output DIRECTORY (one CSV per table)")
+    p.add_argument("--output", "--out", dest="out", type=Path, default=DEFAULT_OUT,
+                   help="Flat all-fields CSV path (default goget/gem_export_goget.csv)")
+    p.add_argument("--tables-dir", type=Path, default=DEFAULT_TABLES_DIR,
+                   help="Output DIRECTORY for the multi-table dump")
+    which = p.add_mutually_exclusive_group()
+    which.add_argument("--flat-only", action="store_true",
+                       help="Only the flat CSV + colmap; skip the multi-table dump")
+    which.add_argument("--tables-only", action="store_true",
+                       help="Only the multi-table dump; skip the flat CSV")
+    p.add_argument("--limit", type=int, help="Plant-count cap for the flat CSV (testing)")
+    p.add_argument("--map-only", action="store_true",
+                   help="Skip fetching; just derive the colmap from the existing flat CSV")
     p.add_argument("--include-history", action="store_true",
                    help="Also export the multi-GB plant_history audit table")
     p.add_argument("--mark-only", action="store_true",
-                   help="Skip the pull; just (re)run the deleted-flag pass")
+                   help="Skip the table pull; just (re)run the deleted-flag pass")
     args = p.parse_args()
-    if not args.mark_only:
-        pull_tables(args.out, include_history=args.include_history)
-    mark_deleted(args.out)
+
+    do_flat = not args.tables_only
+    do_tables = not args.flat_only and not args.map_only
+
+    if do_flat:
+        if not args.map_only:
+            pull_flat(args.out, limit=args.limit)
+        gem_colmap.derive_report_save(args.out, EXPECTED_COLUMNS)
+
+    if do_tables:
+        if not args.mark_only:
+            pull_tables(args.tables_dir, include_history=args.include_history)
+        mark_deleted(args.tables_dir)
 
 
 if __name__ == "__main__":

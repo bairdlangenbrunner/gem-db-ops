@@ -673,10 +673,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Show which tables would be exported (requires --project-type). Exits.",
     )
     parser.add_argument(
-        "--all-fields", choices=["lng", "gogpt"], metavar="{lng,gogpt}",
+        "--all-fields", choices=["lng", "gogpt", "goget"], metavar="{lng,gogpt,goget}",
         help="Produce the website's flat 'Export all fields' CSV. "
              "`lng` = LNG terminals (one row per lng_unit, ~115 columns). "
-             "`gogpt` = oil & gas power plants (combustion + trackerSearch=GOGPT). "
+             "`gogpt` = oil & gas power plants (every combustion unit, 91 columns). "
+             "`goget` = oil & gas extraction (one row per project, 46 columns). "
              "Requires -o OUTPUT_FILE.",
     )
     return parser
@@ -870,6 +871,9 @@ def main() -> int:
         elif args.all_fields == "gogpt":
             from gem_all_fields import export_gogpt_all_fields
             n = export_gogpt_all_fields(engine, args.output, args.limit)
+        elif args.all_fields == "goget":
+            from gem_all_fields import export_goget_all_fields
+            n = export_goget_all_fields(engine, args.output, args.limit)
         else:
             sys.stderr.write(f"ERROR: unknown --all-fields target: {args.all_fields}\n")
             return 2

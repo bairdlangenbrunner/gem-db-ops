@@ -128,6 +128,7 @@ ID_PREFIX_ENTITY = "E"
 # projectType codes (see PROJECT_TYPES in gem_query.py).
 LNG_PROJECT_TYPE = 8
 COMBUSTION_PROJECT_TYPE = 1
+GOGET_PROJECT_TYPE = 9
 # GOGPT lives inside combustion; filter by powerplant_unit.trackerSearch = 'GOGPT'.
 GOGPT_TRACKER = "GOGPT"
 
@@ -2507,6 +2508,496 @@ def export_gogpt_all_fields(engine: Engine, out_path: str, limit: int | None = N
 
     with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=GOGPT_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows)
+
+
+# --------------------------------------------------------------------------
+# GOGET (oil & gas extraction) all-fields export
+# --------------------------------------------------------------------------
+#
+# Port of the Django `all_goget` report (GEM-project-db,
+# projects/project_display.py: ALL_GOGET_FIELDS, all_fields_csv_generator_goget,
+# display_unit_search + display_goget_unit, GOGET_MAP). One row per
+# powerplant_unit of a projectType=9 plant; every GOGET plant has exactly one
+# unit, so this is one row per field/project. The "Unit ID" / "Unit Name"
+# columns are the PLANT id ('L' prefix) and plant name, not the unit's - that
+# is what GOGET_MAP does on the website.
+
+# External-ID system whose ids get their own "Rystad ID" column.
+RYSTAD_SYSTEM_NAME = "Rystad UCube"
+
+# Website header order (ALL_GOGET_FIELDS, 46 columns).
+GOGET_COLUMNS = [
+    "Unit Type",
+    "Project",
+    "Concession/Block",
+    "Basin",
+    "Unit ID",
+    "Unit Name",
+    "Base Name",
+    "Unit local script",
+    "Other Names",
+    "Fuel type",
+    "Country/Area",
+    "Subnational unit",
+    "Latitude",
+    "Longitude",
+    "Location accuracy",
+    "Project outline (WKT)",
+    "Onshore/Offshore",
+    "Production Type",
+    "Status",
+    "Status detail",
+    "Status year",
+    "Discovery year",
+    "FID Year",
+    "Production start year",
+    "Operator",
+    "Owner(s)",
+    "Government unit ID",
+    "Rystad ID",
+    "Latest Reserves",
+    "Latest Cumulative Prod",
+    "Latest Production",
+    "Latest Design Capacity Prod",
+    "Wiki URL",
+    "Keep (makeWIKI)",
+    "Offshore Data Source",
+    "Productiontype Data Source",
+    "Projectcomplex Data Source",
+    "Concessionblock Data Source",
+    "Basin Data Source",
+    "Operators Data Source",
+    "Owners Data Source",
+    "Location Data Source",
+    "Status Data Source",
+    "Discovery Year Data Source",
+    "Fid Year Data Source",
+    "Production Start Year Data Source",
+]
+
+
+def _fetch_goget_plants(engine: Engine, limit: int | None) -> list[dict]:
+    """GOGET plants joined to their goget_project row, country, resolved
+    subdivision and the name of the project complex (another plant)."""
+    sql = """
+        SELECT
+            p.id AS plant_id,
+            p.name AS plant_name,
+            p."wikiUrl" AS wiki_url,
+            p."nameOther" AS name_other,
+            p."plantLevelLocation" AS plant_level_location,
+            p."plantLevelOwners" AS plant_level_owners,
+            p."plantLevelOperators" AS plant_level_operators,
+            p."coordinateFormat" AS coordinate_format,
+            p.latitude AS plant_lat,
+            p.longitude AS plant_lon,
+            p."plantJSON"->>'latitude' AS plant_lat_str,
+            p."plantJSON"->>'longitude' AS plant_lon_str,
+            p."latitudeText" AS plant_lat_text,
+            p."longitudeText" AS plant_lon_text,
+            p."locationAccuracy" AS plant_accuracy,
+            p."locationDatasource" AS plant_location_ds,
+            cs.name AS subdivision_name,
+            c."gemName" AS country_name,
+            g."unitType" AS unit_type,
+            g."fuelType" AS fuel_type,
+            g.offshore AS offshore,
+            g."offshoreDatasource" AS offshore_ds,
+            g."productionType" AS production_type,
+            g."productionTypeDatasource" AS production_type_ds,
+            g."makeWIKI" AS make_wiki,
+            g."namePrefix" AS name_prefix,
+            g.basin AS basin,
+            g."basinDatasource" AS basin_ds,
+            g."concessionBlock" AS concession_block1,
+            g."concessionBlock2" AS concession_block2,
+            g."concessionBlock3" AS concession_block3,
+            g."concessionBlock4" AS concession_block4,
+            g."concessionBlock5" AS concession_block5,
+            g."concessionBlock6" AS concession_block6,
+            g."concessionBlock7" AS concession_block7,
+            g."concessionBlockDatasource" AS concession_block_ds,
+            g."projectComplex_id" AS project_complex_id,
+            g."projectComplexDatasource" AS project_complex_ds,
+            pc.name AS project_complex_name
+        FROM plant p
+        LEFT JOIN goget_project g ON g.project_id = p.id
+        LEFT JOIN plant pc ON pc.id = g."projectComplex_id"
+        LEFT JOIN country c ON c.id = p.country_id
+        LEFT JOIN project_country_subdivision cs ON cs.id = p."subnationalLookup_id"
+        WHERE p."projectType" = :ptype AND p.deleted = false
+        ORDER BY p.name, p.id
+    """
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    with engine.connect() as conn:
+        rows = conn.execute(text(sql), {"ptype": GOGET_PROJECT_TYPE}).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def _fetch_goget_units(engine: Engine, plant_ids: list[int]) -> list[dict]:
+    """Units of the given GOGET plants. Only the location columns matter at
+    unit level (used when plantLevelLocation is false); status comes from
+    status_timeline, never from the legacy status_id column."""
+    if not plant_ids:
+        return []
+    sql = """
+        SELECT
+            pu.id AS unit_id,
+            pu.plant_id AS plant_id,
+            pu.name AS unit_name,
+            pu."coordinateFormat" AS coordinate_format,
+            pu.latitude AS unit_lat,
+            pu.longitude AS unit_lon,
+            pu."unitJSON"->>'latitude' AS unit_lat_str,
+            pu."unitJSON"->>'longitude' AS unit_lon_str,
+            pu."latitudeText" AS unit_lat_text,
+            pu."longitudeText" AS unit_lon_text,
+            pu."locationAccuracy" AS unit_accuracy,
+            pu."locationDatasource" AS unit_location_ds,
+            cs.name AS subdivision_name
+        FROM powerplant_unit pu
+        LEFT JOIN project_country_subdivision cs ON cs.id = pu."subnationalLookup_id"
+        WHERE pu.plant_id = ANY(:plant_ids) AND pu.deleted = false
+        ORDER BY pu.plant_id, pu.id
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(text(sql), {"plant_ids": plant_ids}).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def _fetch_goget_reserves_years(engine: Engine, plant_ids: list[int]) -> dict[int, list[dict]]:
+    """reserves_production rows WITH a year, per plant, oldest first. Only
+    the year and the row type are needed for the four "Latest ..." columns."""
+    if not plant_ids:
+        return {}
+    sql = """
+        SELECT project_id AS plant_id, "productionReserves" AS kind, year
+        FROM reserves_production
+        WHERE project_id = ANY(:plant_ids) AND year IS NOT NULL
+        ORDER BY project_id, year, id
+    """
+    out: dict[int, list[dict]] = defaultdict(list)
+    with engine.connect() as conn:
+        for r in conn.execute(text(sql), {"plant_ids": plant_ids}):
+            out[r._mapping["plant_id"]].append(_row_to_dict(r))
+    return dict(out)
+
+
+def _fetch_goget_geospatial(engine: Engine, plant_ids: list[int]) -> dict[int, str]:
+    """First project_geospatial row per plant (the website uses `.first()`,
+    i.e. lowest id)."""
+    if not plant_ids:
+        return {}
+    sql = """
+        SELECT DISTINCT ON (project_id) project_id AS plant_id, wkt
+        FROM project_geospatial
+        WHERE project_id = ANY(:plant_ids)
+        ORDER BY project_id, id
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(text(sql), {"plant_ids": plant_ids}).fetchall()
+    return {r._mapping["plant_id"]: (r._mapping["wkt"] or "") for r in rows}
+
+
+def _derive_goget_status(rows: list[dict]) -> dict:
+    """Port of the status block of Django's display_goget_unit.
+
+    `rows` are a unit's status_timeline rows as returned by
+    _fetch_status_timelines (keys: order, status, substatus, year, ds).
+    Rows are grouped by (status, substatus); every time a key reappears its
+    group moves to the END of the insertion order, so groups are visited in
+    the order of their LAST occurrence. Walking the groups in that order:
+
+      - every group whose substatus is not 'planned' overwrites the current
+        Status / Status detail / Status year / Status Data Source with its
+        last row, so the final non-planned group wins;
+      - Discovery year = first dated row of the first 'discovered' group;
+        FID Year = first dated row of the first non-planned 'in-development'
+        group; Production start year = first dated row of the first
+        'operating' + 'ramp up' group. Each carries that row's data sources.
+    """
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for r in sorted(rows, key=lambda x: int(x.get("order") or 0)):
+        key = (r.get("status") or "", r.get("substatus") or "")
+        existing = groups.pop(key, [])
+        existing.append(r)
+        groups[key] = existing
+
+    out = {
+        "status": "", "substatus": "", "status_year": None, "status_ds": [],
+        "discovery_year": None, "discovery_ds": [],
+        "fid_year": None, "fid_ds": [],
+        "start_year": None, "start_ds": [],
+    }
+    for (status, substatus), group in groups.items():
+        if substatus != "planned":
+            out["status"] = status
+            out["substatus"] = substatus
+            out["status_year"] = group[-1].get("year")
+            out["status_ds"] = group[-1].get("ds") or []
+        dated = [r for r in group if r.get("year")]
+        if not dated:
+            continue
+        if status == "discovered" and not out["discovery_year"]:
+            out["discovery_year"] = dated[0].get("year")
+            out["discovery_ds"] = dated[0].get("ds") or []
+        if status == "in-development" and substatus != "planned" and not out["fid_year"]:
+            out["fid_year"] = dated[0].get("year")
+            out["fid_ds"] = dated[0].get("ds") or []
+        if status == "operating" and substatus == "ramp up" and not out["start_year"]:
+            out["start_year"] = dated[0].get("year")
+            out["start_ds"] = dated[0].get("ds") or []
+    return out
+
+
+def _goget_coordinates(entity: dict, prefix: str) -> tuple[str, str]:
+    """Latitude/Longitude the way display_unit_search picks them: the decimal
+    columns for 'WGS 84 decimal' (or no format), otherwise the free-text
+    latitudeText/longitudeText. The JSON copy of the decimal is preferred
+    because that is the string the website prints (no padding to 7 dp)."""
+    fmt = entity.get("coordinate_format") or ""
+    if fmt in ("WGS 84 decimal", ""):
+        lat = entity.get(f"{prefix}_lat_str")
+        lon = entity.get(f"{prefix}_lon_str")
+        if lat is None:
+            lat = _fmt_coord(entity.get(f"{prefix}_lat"))
+        if lon is None:
+            lon = _fmt_coord(entity.get(f"{prefix}_lon"))
+        return lat or "", lon or ""
+    return entity.get(f"{prefix}_lat_text") or "", entity.get(f"{prefix}_lon_text") or ""
+
+
+def _goget_build_row(plant: dict, unit: dict, ctx: dict) -> dict:
+    ds = ctx["data_sources"]
+    plant_id = plant["plant_id"]
+    unit_id = unit["unit_id"]
+
+    def refs(v):
+        return _resolve_refs(v or [], ds)
+
+    # Location: plant-level unless plantLevelLocation is false.
+    if plant.get("plant_level_location"):
+        lat, lon = _goget_coordinates(plant, "plant")
+        accuracy = plant.get("plant_accuracy") or ""
+        location_ds = plant.get("plant_location_ds") or []
+        subnational = plant.get("subdivision_name") or ""
+    else:
+        lat, lon = _goget_coordinates(unit, "unit")
+        accuracy = unit.get("unit_accuracy") or ""
+        location_ds = unit.get("unit_location_ds") or []
+        subnational = unit.get("subdivision_name") or ""
+
+    # Owners. GOGET is not an implied-share tracker: the raw share is shown,
+    # truncated to an int, and a 0 / NULL share shows the bare name. The
+    # website renders from a set; sort by share DESC NULLS LAST then
+    # plant_owner.id for a stable output.
+    if plant.get("plant_level_owners"):
+        owners = ctx["owners_by_plant"].get(plant_id, [])
+    else:
+        owners = ctx["owners_by_unit"].get(unit_id, [])
+    owners = sorted(
+        owners,
+        key=lambda o: (
+            o.get("share") is None,
+            -Decimal(o["share"]) if o.get("share") is not None else Decimal(0),
+            o.get("po_id") or 0,
+        ),
+    )
+    owner_pieces: list[str] = []
+    owner_ds_ids: list[int] = []
+    for o in owners:
+        owner_ds_ids.extend(o.get("share_ds") or [])
+        name = _company_display(o.get("company_name"), o.get("legal_type"))
+        if not name or not o.get("company_id"):
+            continue
+        share = o.get("share")
+        if share:
+            owner_pieces.append(f"{name} [{int(Decimal(share))}%]")
+        else:
+            owner_pieces.append(name)
+
+    # Operators: bare company names (no legal-entity suffix, no share), every
+    # operator row of the entity regardless of `type`. plantLevelOperators
+    # NULL counts as plant-level.
+    plant_level_operators = plant.get("plant_level_operators")
+    if plant_level_operators is None or plant_level_operators:
+        ops = ctx["operators_by_plant"].get(plant_id, [])
+    else:
+        ops = ctx["operators_by_unit"].get(unit_id, [])
+    operator_pieces: list[str] = []
+    operator_ds_ids: list[int] = []
+    for o in ops:
+        operator_ds_ids.extend(o.get("op_ds") or [])
+        if o.get("company_name") and o.get("company_name") not in operator_pieces:
+            operator_pieces.append(o["company_name"])
+
+    # External ids: "<system>: <id>" pieces; Rystad UCube ids get their own
+    # column with the prefix stripped, everything else is "Government unit ID".
+    gov_ids: list[str] = []
+    rystad_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for r in ctx["plant_external_ids"].get(plant_id, []):
+        system = ctx["external_id_systems"].get(r.get("idSystem_id")) or ""
+        ext = r.get("externalId") or ""
+        if not (system or ext):
+            continue
+        piece = f"{system}: {ext}"
+        if piece in seen_ids:
+            continue
+        seen_ids.add(piece)
+        if system == RYSTAD_SYSTEM_NAME:
+            rystad_ids.append(ext)
+        else:
+            gov_ids.append(piece)
+
+    # Local-script names: distinct plant_language names, first-seen order.
+    local_names: list[str] = []
+    for lang in ctx["plant_languages"].get(plant_id, []):
+        n = lang.get("local_name")
+        if n and n not in local_names:
+            local_names.append(n)
+
+    st = _derive_goget_status(ctx["timelines"].get(unit_id, []))
+
+    latest: dict[str, str] = {}
+    for r in ctx["reserves_years"].get(plant_id, []):
+        latest[r.get("kind") or ""] = _fmt_year(r.get("year"))
+
+    concession = "; ".join(
+        v for v in (plant.get(f"concession_block{i}") for i in range(1, 8)) if v
+    )
+    name_other = plant.get("name_other") or []
+    if isinstance(name_other, str):
+        name_other = [name_other]
+    name_other = list(dict.fromkeys(n for n in name_other if n))
+
+    return {
+        "Unit Type": plant.get("unit_type") or "",
+        "Project": plant.get("project_complex_name") or "",
+        "Concession/Block": concession,
+        "Basin": plant.get("basin") or "",
+        "Unit ID": f"{ID_PREFIX_LOCATION}{plant_id}",
+        "Unit Name": plant.get("plant_name") or "",
+        "Base Name": plant.get("name_prefix") or "",
+        "Unit local script": ", ".join(local_names),
+        "Other Names": ", ".join(name_other),
+        "Fuel type": plant.get("fuel_type") or "",
+        "Country/Area": plant.get("country_name") or "",
+        "Subnational unit": subnational,
+        "Latitude": lat,
+        "Longitude": lon,
+        "Location accuracy": accuracy,
+        "Project outline (WKT)": ctx["geospatial"].get(plant_id, ""),
+        "Onshore/Offshore": plant.get("offshore") or "unknown",
+        "Production Type": plant.get("production_type") or "",
+        "Status": st["status"],
+        "Status detail": st["substatus"],
+        "Status year": _fmt_year(st["status_year"]),
+        "Discovery year": _fmt_year(st["discovery_year"]),
+        "FID Year": _fmt_year(st["fid_year"]),
+        "Production start year": _fmt_year(st["start_year"]),
+        "Operator": "; ".join(operator_pieces),
+        "Owner(s)": "; ".join(owner_pieces),
+        "Government unit ID": ", ".join(gov_ids),
+        "Rystad ID": ", ".join(rystad_ids),
+        "Latest Reserves": latest.get("reserves", ""),
+        "Latest Cumulative Prod": latest.get("cumulative production", ""),
+        "Latest Production": latest.get("production", ""),
+        "Latest Design Capacity Prod": latest.get("production design capacity", ""),
+        "Wiki URL": plant.get("wiki_url") or "",
+        "Keep (makeWIKI)": _yn(plant.get("make_wiki")),
+        "Offshore Data Source": refs(plant.get("offshore_ds")),
+        "Productiontype Data Source": refs(plant.get("production_type_ds")),
+        "Projectcomplex Data Source": refs(plant.get("project_complex_ds")),
+        "Concessionblock Data Source": refs(plant.get("concession_block_ds")),
+        "Basin Data Source": refs(plant.get("basin_ds")),
+        "Operators Data Source": refs(operator_ds_ids),
+        "Owners Data Source": refs(owner_ds_ids),
+        "Location Data Source": refs(location_ds),
+        "Status Data Source": refs(st["status_ds"]),
+        "Discovery Year Data Source": refs(st["discovery_ds"]),
+        "Fid Year Data Source": refs(st["fid_ds"]),
+        "Production Start Year Data Source": refs(st["start_ds"]),
+    }
+
+
+def export_goget_all_fields(engine: Engine, out_path: str, limit: int | None = None) -> int:
+    """GOGET (oil & gas extraction) all-fields CSV: one row per unit of every
+    non-deleted projectType=9 plant, 46 columns, mirroring the website's
+    `all_goget` report. Returns the row count."""
+    plants = _fetch_goget_plants(engine, limit)
+    plant_ids = [p["plant_id"] for p in plants]
+    units = _fetch_goget_units(engine, plant_ids)
+    unit_ids = [u["unit_id"] for u in units]
+
+    timelines = _fetch_status_timelines(engine, unit_ids)
+    owners_by_plant, owners_by_unit = _fetch_owners(engine, plant_ids, unit_ids)
+    operators_by_plant, operators_by_unit = _fetch_operators(engine, plant_ids, unit_ids)
+    plant_external_ids = _fetch_plant_external_ids(engine, plant_ids)
+    external_id_systems = _fetch_external_id_systems(engine)
+    plant_languages = _fetch_languages(engine, plant_ids)
+    reserves_years = _fetch_goget_reserves_years(engine, plant_ids)
+    geospatial = _fetch_goget_geospatial(engine, plant_ids)
+
+    ds_ids: set[int] = set()
+
+    def _absorb(maybe_list):
+        if not maybe_list:
+            return
+        for x in maybe_list:
+            try:
+                ds_ids.add(int(x))
+            except (TypeError, ValueError):
+                continue
+
+    for p in plants:
+        for key in ("plant_location_ds", "offshore_ds", "production_type_ds",
+                    "project_complex_ds", "concession_block_ds", "basin_ds"):
+            _absorb(p.get(key))
+    for u in units:
+        _absorb(u.get("unit_location_ds"))
+    for lst in timelines.values():
+        for r in lst:
+            _absorb(r.get("ds"))
+    for lst in list(owners_by_plant.values()) + list(owners_by_unit.values()):
+        for o in lst:
+            _absorb(o.get("share_ds"))
+    for lst in list(operators_by_plant.values()) + list(operators_by_unit.values()):
+        for o in lst:
+            _absorb(o.get("op_ds"))
+    data_sources = _fetch_data_sources(engine, ds_ids)
+
+    ctx = {
+        "data_sources": data_sources,
+        "timelines": timelines,
+        "owners_by_plant": owners_by_plant,
+        "owners_by_unit": owners_by_unit,
+        "operators_by_plant": operators_by_plant,
+        "operators_by_unit": operators_by_unit,
+        "plant_external_ids": plant_external_ids,
+        "external_id_systems": external_id_systems,
+        "plant_languages": plant_languages,
+        "reserves_years": reserves_years,
+        "geospatial": geospatial,
+    }
+
+    plant_by_id = {p["plant_id"]: p for p in plants}
+    rows = []
+    for u in units:
+        p = plant_by_id.get(u["plant_id"])
+        if p is None:
+            continue
+        rows.append(_goget_build_row(p, u, ctx))
+
+    # Website default sort is plant name; break ties on the id.
+    rows.sort(key=lambda r: (r["Unit Name"], int(r["Unit ID"][1:])))
+
+    with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=GOGET_COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
     return len(rows)

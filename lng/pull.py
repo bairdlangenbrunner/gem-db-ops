@@ -4,7 +4,13 @@ Pull the current LNG terminals "all-fields" CSV from the GEM database and
 derive the column-index map from the header row.
 
 Reads directly from the read-only Postgres (no cookies) via ../gem_query.py's
-engine + ../gem_all_fields.py's exporter. Requires:
+engine + ../gem_all_fields.export_all_fields, a port of the website's
+`all_lng` report (GEM-project-db projects/project_display.py:
+LNG_INTERNAL_EXPORT headers, display_unit_search + display_lng_unit row
+logic). 115 columns, one row per lng_unit of every non-deleted LNG plant.
+Where the two differ on purpose (see docs/ALL_FIELDS_STATUS.md) it is
+because we read live columns where the website reads its cached plantJSON,
+or because we order multi-value cells where Django uses a set. Requires:
 
     export GEM_READONLY_DB_URL='postgres://readonly:PASSWORD@HOST:5432/DBNAME'
 
