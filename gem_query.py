@@ -74,7 +74,7 @@ try:
 except ImportError:
     sys.stderr.write(
         "ERROR: sqlalchemy is not installed. Install with:\n"
-        "    pip install 'sqlalchemy>=2.0' psycopg2-binary\n"
+        "    pip install 'sqlalchemy>=2.0' psycopg2-binary 'psycopg[binary]'\n"
     )
     sys.exit(1)
 

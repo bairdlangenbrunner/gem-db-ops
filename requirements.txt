@@ -1,6 +1,8 @@
 # Postgres pulls (lng/, gogpt/, goget/) need these.
 sqlalchemy>=2.0
+# SQLAlchemy 2.1 made psycopg (v3) the default postgresql:// driver, 2.0 used psycopg2 — carry both
 psycopg2-binary
+psycopg[binary]
 requests
 
 # The Sheets pulls (ggit/, goit/, gem_sheets.py) need NO pip packages — they
